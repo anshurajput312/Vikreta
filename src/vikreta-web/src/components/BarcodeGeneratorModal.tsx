@@ -122,7 +122,7 @@ export const BarcodeGeneratorModal: React.FC<BarcodeGeneratorModalProps> = ({
   // Update quantity of stickers for an item in multi-product queue
   const updateItemCount = (index: number, newCount: number) => {
     setMultiItems((prev) =>
-      prev.map((item, idx) => (idx === index ? { ...item, count: Math.max(1, newCount) } : item))
+      prev.map((item, idx) => (idx === index ? { ...item, count: newCount } : item))
     );
   };
 
@@ -359,7 +359,7 @@ export const BarcodeGeneratorModal: React.FC<BarcodeGeneratorModalProps> = ({
                     max="200"
                     value={copies}
                     onChange={(e) => setCopies(Math.max(1, parseInt(e.target.value) || 1))}
-                    className="input text-xs font-mono w-full"
+                    className="input text-xs font-mono font-bold text-ink bg-white w-full [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                   />
                 </div>
               </div>
@@ -570,36 +570,53 @@ export const BarcodeGeneratorModal: React.FC<BarcodeGeneratorModalProps> = ({
                           </div>
 
                           {/* Stepper for Copies of this Product */}
-                          <div className="flex items-center gap-1 flex-shrink-0">
+                          <div className="flex items-center gap-1.5 flex-shrink-0">
                             <button
                               type="button"
-                              onClick={() => updateItemCount(idx, item.count - 1)}
-                              className="w-6 h-6 rounded-lg bg-paper-alt hover:bg-paper border border-line flex items-center justify-center font-bold text-xs"
+                              onClick={() => updateItemCount(idx, Math.max(1, (item.count || 1) - 1))}
+                              className="w-7 h-7 rounded-lg bg-paper-alt hover:bg-paper active:scale-95 border border-line flex items-center justify-center font-bold text-sm text-ink transition-all shadow-2xs select-none"
+                              title="Decrease count"
                             >
                               -
                             </button>
                             <input
                               type="number"
                               min="1"
-                              max="100"
-                              value={item.count}
-                              onChange={(e) => updateItemCount(idx, parseInt(e.target.value) || 1)}
-                              className="w-10 text-center font-mono text-xs font-bold py-0.5 border border-line rounded-lg"
+                              max="200"
+                              value={item.count || ''}
+                              onChange={(e) => {
+                                const raw = e.target.value;
+                                if (raw === '') {
+                                  updateItemCount(idx, 0);
+                                } else {
+                                  const val = parseInt(raw, 10);
+                                  if (!isNaN(val)) {
+                                    updateItemCount(idx, Math.max(1, val));
+                                  }
+                                }
+                              }}
+                              onBlur={() => {
+                                if (!item.count || item.count < 1) {
+                                  updateItemCount(idx, 1);
+                                }
+                              }}
+                              className="w-12 h-7 text-center font-mono text-xs font-black text-ink bg-white border-2 border-line rounded-lg shadow-2xs focus:outline-none focus:border-teal [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                             />
                             <button
                               type="button"
-                              onClick={() => updateItemCount(idx, item.count + 1)}
-                              className="w-6 h-6 rounded-lg bg-paper-alt hover:bg-paper border border-line flex items-center justify-center font-bold text-xs"
+                              onClick={() => updateItemCount(idx, (item.count || 0) + 1)}
+                              className="w-7 h-7 rounded-lg bg-paper-alt hover:bg-paper active:scale-95 border border-line flex items-center justify-center font-bold text-sm text-ink transition-all shadow-2xs select-none"
+                              title="Increase count"
                             >
                               +
                             </button>
                             <button
                               type="button"
                               onClick={() => removeItem(idx)}
-                              className="p-1 text-ink-soft hover:text-cherry ml-1 rounded"
+                              className="p-1.5 text-ink-soft hover:text-cherry hover:bg-rose-50 ml-0.5 rounded-lg transition-colors"
                               title="Remove from sheet"
                             >
-                              <Trash2 size={13} />
+                              <Trash2 size={14} />
                             </button>
                           </div>
                         </div>
