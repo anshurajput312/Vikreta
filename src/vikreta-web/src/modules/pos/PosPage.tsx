@@ -375,7 +375,7 @@ export const PosPage: React.FC = () => {
       !q ||
       p.name?.toLowerCase().includes(q) ||
       p.sku?.toLowerCase().includes(q) ||
-      p.barcode?.includes(q) ||
+      p.barcode?.toLowerCase().includes(q) ||
       p.categoryName?.toLowerCase().includes(q);
     const matchesCat = !activeCategory || p.categoryId === activeCategory;
     return matchesSearch && matchesCat;

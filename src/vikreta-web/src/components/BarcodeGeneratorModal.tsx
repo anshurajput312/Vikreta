@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { 
   X, 
   Printer, 
@@ -86,6 +86,13 @@ export const BarcodeGeneratorModal: React.FC<BarcodeGeneratorModalProps> = ({
     if (apiItems.length > 0) return apiItems;
     return productsList;
   }, [catalogData, productsList]);
+
+  // Auto-select first product when catalog loads if none currently selected
+  useEffect(() => {
+    if (!selectedProduct && availableCatalog.length > 0) {
+      setSelectedProduct(availableCatalog[0]);
+    }
+  }, [availableCatalog, selectedProduct]);
 
   const sheetSizes = {
     'a4-24': { name: 'A4 Sheet (24-Up · 3×8)', count: 24, grid: 'grid-cols-3', w: '70mm', h: '37mm' },

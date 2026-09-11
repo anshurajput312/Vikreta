@@ -224,9 +224,7 @@
   /* Barcode sticker sheet printing */
   .printable-barcode-sheet {
     display: block !important;
-    position: absolute !important;
-    left: 0 !important;
-    top: 0 !important;
+    position: relative !important;
     width: 100% !important;
     margin: 0 !important;
     padding: 0 !important;
@@ -265,5 +263,7 @@
     width: 50mm !important;
     height: 25mm !important;
     margin: 0 auto !important;
+    page-break-after: always !important;
+    break-after: page !important;
   }
 }

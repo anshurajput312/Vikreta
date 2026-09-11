@@ -83,6 +83,8 @@ export const CameraBarcodeScannerModal: React.FC<CameraBarcodeScannerModalProps>
   const videoRef = useRef<HTMLVideoElement>(null);
   const readerRef = useRef<BrowserMultiFormatReader | null>(null);
   const nativeTimerRef = useRef<any>(null);
+  const scanCooldownRef = useRef<{ [code: string]: number }>({});
+  const handleScanRef = useRef<((code: string) => Promise<void>) | null>(null);
 
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [facingMode, setFacingMode] = useState<'environment' | 'user'>('environment');
@@ -94,11 +96,10 @@ export const CameraBarcodeScannerModal: React.FC<CameraBarcodeScannerModalProps>
   const [continuousMode, setContinuousMode] = useState<boolean>(true);
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
   const [lastScanned, setLastScanned] = useState<LastScannedItem | null>(null);
-  const [scanCooldown, setScanCooldown] = useState<{ [code: string]: number }>({});
   const [scanFlash, setScanFlash] = useState<'success' | 'error' | null>(null);
   const [manualCode, setManualCode] = useState('');
 
-  // Stop current video stream & decoder
+  // Stop current video stream & decoder and explicitly release hardware camera tracks
   const stopScanner = useCallback(() => {
     if (nativeTimerRef.current) {
       clearInterval(nativeTimerRef.current);
@@ -109,6 +110,13 @@ export const CameraBarcodeScannerModal: React.FC<CameraBarcodeScannerModalProps>
         readerRef.current.reset();
       } catch {}
       readerRef.current = null;
+    }
+    if (videoRef.current && videoRef.current.srcObject) {
+      try {
+        const stream = videoRef.current.srcObject as MediaStream;
+        stream.getTracks().forEach((track) => track.stop());
+      } catch {}
+      videoRef.current.srcObject = null;
     }
     setTorchOn(false);
     setHasTorch(false);
@@ -122,11 +130,12 @@ export const CameraBarcodeScannerModal: React.FC<CameraBarcodeScannerModalProps>
 
       // Prevent repeated burst scans of the same barcode within 2 seconds
       const now = Date.now();
-      if (scanCooldown[code] && now - scanCooldown[code] < 2000) {
+      const lastScannedTime = scanCooldownRef.current[code] || 0;
+      if (now - lastScannedTime < 2000) {
         return;
       }
 
-      setScanCooldown((prev) => ({ ...prev, [code]: now }));
+      scanCooldownRef.current[code] = now;
       setIsProcessing(true);
 
       // Trigger haptic vibration on mobile devices
@@ -171,8 +180,12 @@ export const CameraBarcodeScannerModal: React.FC<CameraBarcodeScannerModalProps>
         }, 300);
       }
     },
-    [continuousMode, onClose, onScan, scanCooldown, soundEnabled]
+    [continuousMode, onClose, onScan, soundEnabled]
   );
+
+  useEffect(() => {
+    handleScanRef.current = handleBarcodeDetected;
+  }, [handleBarcodeDetected]);
 
   // Initialize ZXing barcode engine with high-resolution constraints
   useEffect(() => {
@@ -243,7 +256,7 @@ export const CameraBarcodeScannerModal: React.FC<CameraBarcodeScannerModalProps>
                 if (detected && detected.length > 0 && isMounted) {
                   const val = detected[0].rawValue;
                   if (val) {
-                    handleBarcodeDetected(val);
+                    handleScanRef.current?.(val);
                   }
                 }
               } catch {}
@@ -259,7 +272,7 @@ export const CameraBarcodeScannerModal: React.FC<CameraBarcodeScannerModalProps>
             if (result) {
               const text = result.getText();
               if (text) {
-                handleBarcodeDetected(text);
+                handleScanRef.current?.(text);
               }
             }
           }
@@ -294,7 +307,7 @@ export const CameraBarcodeScannerModal: React.FC<CameraBarcodeScannerModalProps>
       isMounted = false;
       stopScanner();
     };
-  }, [isOpen, facingMode, selectedDeviceId, stopScanner, handleBarcodeDetected]);
+  }, [isOpen, facingMode, selectedDeviceId, stopScanner]);
 
   // Toggle Torch/Flashlight
   const toggleTorch = async () => {

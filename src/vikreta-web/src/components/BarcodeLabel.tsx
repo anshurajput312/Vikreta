@@ -54,14 +54,14 @@ export const BarcodeLabel: React.FC<BarcodeLabelProps> = ({
       // Render crisp, high-contrast barcode to canvas with solid white quiet zone
       JsBarcode(canvasRef.current, rawCode, {
         format,
-        width: layout === 'thermal' ? 2.0 : 1.8,
-        height: layout === 'a4-40' ? 36 : layout === 'thermal' ? 48 : 42,
+        width: layout === 'thermal' ? 2.0 : layout === 'a4-40' ? 1.3 : 1.8,
+        height: layout === 'a4-40' ? 34 : layout === 'thermal' ? 48 : 42,
         displayValue: showBarcodeText,
-        fontSize: 12,
+        fontSize: layout === 'a4-40' ? 10 : 12,
         font: 'monospace',
         fontOptions: 'bold',
-        textMargin: 3,
-        margin: 12, // Critical quiet zone: minimum 10 modules for camera & laser scanners
+        textMargin: 2,
+        margin: layout === 'a4-40' ? 8 : 12, // Sufficient quiet zone without overflowing narrow labels
         background: '#ffffff', // Pure white solid background
         lineColor: '#000000', // Deep black bars
       });
@@ -71,12 +71,12 @@ export const BarcodeLabel: React.FC<BarcodeLabelProps> = ({
         if (canvasRef.current) {
           JsBarcode(canvasRef.current, rawCode, {
             format: 'CODE128',
-            width: 1.8,
-            height: 38,
+            width: layout === 'a4-40' ? 1.3 : 1.8,
+            height: layout === 'a4-40' ? 34 : 38,
             displayValue: showBarcodeText,
-            fontSize: 12,
+            fontSize: layout === 'a4-40' ? 10 : 12,
             font: 'monospace',
-            margin: 12,
+            margin: layout === 'a4-40' ? 8 : 12,
             background: '#ffffff',
             lineColor: '#000000',
           });
@@ -106,7 +106,7 @@ export const BarcodeLabel: React.FC<BarcodeLabelProps> = ({
         </p>
       )}
       <div className="my-1 flex items-center justify-center max-w-full overflow-hidden bg-white p-0.5 rounded">
-        <canvas ref={canvasRef} className="max-w-full h-auto" />
+        <canvas ref={canvasRef} className="max-w-full h-auto [image-rendering:pixelated]" />
       </div>
       {showPrice && price !== undefined && (
         <p className="text-[11px] font-mono font-extrabold text-gray-900">
