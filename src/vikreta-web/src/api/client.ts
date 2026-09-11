@@ -5,7 +5,9 @@ const isRemoteHost = typeof window !== 'undefined' &&
   window.location.hostname !== 'localhost' &&
   window.location.hostname !== '127.0.0.1';
 
-const BASE_URL = import.meta.env.VITE_API_URL ?? '';
+// When accessed from remote host or ngrok tunnel, ALWAYS use relative '' so Vite reverse-proxies /api.
+// Chrome PNA (Private Network Access) strictly blocks public HTTPS origins from calling http://localhost.
+const BASE_URL = isRemoteHost ? '' : (import.meta.env.VITE_API_URL || '');
 
 export const apiClient = axios.create({
   baseURL: `${BASE_URL}/api`,
