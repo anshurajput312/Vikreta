@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
-import { Plus, Search, Barcode, X } from 'lucide-react';
+import { Plus, Search, Barcode, X, Printer } from 'lucide-react';
 import { productsApi, categoriesApi } from '../../api/client';
 import { DataTable, type Column } from '../../components/DataTable';
 import { StatusBadge } from '../../components/StatusBadge';
@@ -16,6 +16,7 @@ export const ProductsPage: React.FC = () => {
   const [categoryId, setCategoryId] = useState<string>('');
   const [page, setPage] = useState(1);
   const [barcodeProduct, setBarcodeProduct] = useState<any | null>(null);
+  const [barcodeModalOpen, setBarcodeModalOpen] = useState(false);
 
   // Auto-search: update debounced search parameter as user types
   React.useEffect(() => {
@@ -147,10 +148,21 @@ export const ProductsPage: React.FC = () => {
           <h1 className="text-xl font-bold">Products</h1>
           <p className="text-sm text-ink-soft mt-0.5">Manage your product catalog</p>
         </div>
-        <button onClick={() => navigate('/products/new')} className="btn-primary" id="new-product-btn">
-          <Plus size={14} />
-          New Product
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setBarcodeModalOpen(true)}
+            className="btn-secondary text-xs py-2 px-3 gap-1.5"
+            id="print-sheet-btn"
+            title="Generate & print barcode sticker sheets for single or multiple products"
+          >
+            <Printer size={14} />
+            <span>Print Barcode Sheet</span>
+          </button>
+          <button onClick={() => navigate('/products/new')} className="btn-primary" id="new-product-btn">
+            <Plus size={14} />
+            New Product
+          </button>
+        </div>
       </div>
 
       {/* Search & Filter Bar */}
@@ -271,10 +283,15 @@ export const ProductsPage: React.FC = () => {
         />
       </div>
 
-      {barcodeProduct && (
+      {(barcodeProduct || barcodeModalOpen) && (
         <BarcodeGeneratorModal
           product={barcodeProduct}
-          onClose={() => setBarcodeProduct(null)}
+          productsList={items}
+          initialMode={barcodeProduct ? 'single' : 'multi'}
+          onClose={() => {
+            setBarcodeProduct(null);
+            setBarcodeModalOpen(false);
+          }}
         />
       )}
     </div>
