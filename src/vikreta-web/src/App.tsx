@@ -23,12 +23,16 @@ const CustomerDetailPage = lazy(() => import('./modules/customers/CustomerDetail
 const SuppliersPage = lazy(() => import('./modules/suppliers/SuppliersPage').then(m => ({ default: m.SuppliersPage })));
 const PurchaseOrdersPage = lazy(() => import('./modules/suppliers/PurchaseOrdersPage').then(m => ({ default: m.PurchaseOrdersPage })));
 const SalesReportPage = lazy(() => import('./modules/reports/SalesReportPage').then(m => ({ default: m.SalesReportPage })));
+const ProfitMarginReportPage = lazy(() => import('./modules/reports/ProfitMarginReportPage').then(m => ({ default: m.ProfitMarginReportPage })));
+const HourlyRushPage = lazy(() => import('./modules/reports/HourlyRushPage').then(m => ({ default: m.HourlyRushPage })));
+const CashierPerformancePage = lazy(() => import('./modules/reports/CashierPerformancePage').then(m => ({ default: m.CashierPerformancePage })));
 const StockValuationPage = lazy(() => import('./modules/reports/StockValuationPage').then(m => ({ default: m.StockValuationPage })));
 const TopProductsPage = lazy(() => import('./modules/reports/TopProductsPage').then(m => ({ default: m.TopProductsPage })));
 const TaxSummaryPage = lazy(() => import('./modules/reports/TaxSummaryPage').then(m => ({ default: m.TaxSummaryPage })));
 const AdminLocationsPage = lazy(() => import('./modules/admin/AdminLocationsPage').then(m => ({ default: m.AdminLocationsPage })));
 const AdminUsersPage = lazy(() => import('./modules/admin/AdminUsersPage').then(m => ({ default: m.AdminUsersPage })));
 const AdminSettingsPage = lazy(() => import('./modules/admin/AdminSettingsPage').then(m => ({ default: m.AdminSettingsPage })));
+const DigitalReceiptPage = lazy(() => import('./modules/invoices/DigitalReceiptPage').then(m => ({ default: m.DigitalReceiptPage })));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -74,6 +78,7 @@ export default function App() {
         <Routes>
           <Route path="/login" element={<LoginPage />} />
           <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+          <Route path="/receipt/:id" element={<Suspense fallback={<PageLoader />}><DigitalReceiptPage /></Suspense>} />
 
           <Route path="/" element={<AuthGuard><AppShell /></AuthGuard>}>
             <Route index element={<Suspense fallback={<PageLoader />}><DashboardPage /></Suspense>} />
@@ -105,6 +110,9 @@ export default function App() {
             {/* Reports */}
             <Route path="reports" element={<Navigate to="/reports/sales" replace />} />
             <Route path="reports/sales" element={<Suspense fallback={<PageLoader />}><SalesReportPage /></Suspense>} />
+            <Route path="reports/profit-margin" element={<Suspense fallback={<PageLoader />}><ProfitMarginReportPage /></Suspense>} />
+            <Route path="reports/hourly-rush" element={<Suspense fallback={<PageLoader />}><HourlyRushPage /></Suspense>} />
+            <Route path="reports/cashier-performance" element={<Suspense fallback={<PageLoader />}><CashierPerformancePage /></Suspense>} />
             <Route path="reports/stock-valuation" element={<Suspense fallback={<PageLoader />}><StockValuationPage /></Suspense>} />
             <Route path="reports/top-products" element={<Suspense fallback={<PageLoader />}><TopProductsPage /></Suspense>} />
             <Route path="reports/tax-summary" element={<Suspense fallback={<PageLoader />}><TaxSummaryPage /></Suspense>} />

@@ -186,6 +186,7 @@ public class Invoice
     public User CreatedBy { get; set; } = null!;
     public ICollection<InvoiceLine> Lines { get; set; } = new List<InvoiceLine>();
     public ICollection<Payment> Payments { get; set; } = new List<Payment>();
+    public ICollection<InvoiceReturn> Returns { get; set; } = new List<InvoiceReturn>();
 }
 
 // Snapshots price/tax at time of sale — never re-reads live Product pricing
@@ -204,6 +205,42 @@ public class InvoiceLine
     public decimal LineTotal { get; set; }
 
     public Invoice Invoice { get; set; } = null!;
+    public Product Product { get; set; } = null!;
+}
+
+public class InvoiceReturn
+{
+    public Guid Id { get; set; }
+    public Guid TenantId { get; set; }
+    public Guid InvoiceId { get; set; }
+    public string ReturnNumber { get; set; } = string.Empty;
+    public DateTime ReturnedAt { get; set; }
+    public decimal TotalRefundAmount { get; set; }
+    public PaymentMethod RefundMethod { get; set; }
+    public string Reason { get; set; } = string.Empty;
+    public Guid ProcessedByUserId { get; set; }
+
+    public Tenant Tenant { get; set; } = null!;
+    public Invoice Invoice { get; set; } = null!;
+    public User ProcessedByUser { get; set; } = null!;
+    public ICollection<InvoiceReturnLine> Lines { get; set; } = new List<InvoiceReturnLine>();
+}
+
+public class InvoiceReturnLine
+{
+    public Guid Id { get; set; }
+    public Guid ReturnId { get; set; }
+    public Guid InvoiceLineId { get; set; }
+    public Guid ProductId { get; set; }
+    public Guid? VariantId { get; set; }
+    public string ProductNameSnapshot { get; set; } = string.Empty;
+    public int Quantity { get; set; }
+    public decimal UnitPriceSnapshot { get; set; }
+    public decimal RefundAmount { get; set; }
+    public bool Restocked { get; set; }
+
+    public InvoiceReturn Return { get; set; } = null!;
+    public InvoiceLine InvoiceLine { get; set; } = null!;
     public Product Product { get; set; } = null!;
 }
 

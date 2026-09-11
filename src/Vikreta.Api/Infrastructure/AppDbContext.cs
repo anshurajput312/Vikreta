@@ -29,10 +29,12 @@ public class AppDbContext : DbContext
     public DbSet<StockTransfer> StockTransfers => Set<StockTransfer>();
     public DbSet<StockTransferLine> StockTransferLines => Set<StockTransferLine>();
 
-    // Billing
+    // Billing & Returns
     public DbSet<Invoice> Invoices => Set<Invoice>();
     public DbSet<InvoiceLine> InvoiceLines => Set<InvoiceLine>();
     public DbSet<Payment> Payments => Set<Payment>();
+    public DbSet<InvoiceReturn> InvoiceReturns => Set<InvoiceReturn>();
+    public DbSet<InvoiceReturnLine> InvoiceReturnLines => Set<InvoiceReturnLine>();
 
     // CRM
     public DbSet<Customer> Customers => Set<Customer>();
@@ -58,6 +60,7 @@ public class AppDbContext : DbContext
         modelBuilder.Entity<InventoryTransaction>().HasQueryFilter(e => _tenantContext.TenantId == Guid.Empty || e.TenantId == _tenantContext.TenantId);
         modelBuilder.Entity<StockTransfer>().HasQueryFilter(e => _tenantContext.TenantId == Guid.Empty || e.TenantId == _tenantContext.TenantId);
         modelBuilder.Entity<Invoice>().HasQueryFilter(e => _tenantContext.TenantId == Guid.Empty || e.TenantId == _tenantContext.TenantId);
+        modelBuilder.Entity<InvoiceReturn>().HasQueryFilter(e => _tenantContext.TenantId == Guid.Empty || e.TenantId == _tenantContext.TenantId);
         modelBuilder.Entity<Customer>().HasQueryFilter(e => _tenantContext.TenantId == Guid.Empty || e.TenantId == _tenantContext.TenantId);
         modelBuilder.Entity<Supplier>().HasQueryFilter(e => _tenantContext.TenantId == Guid.Empty || e.TenantId == _tenantContext.TenantId);
         modelBuilder.Entity<PurchaseOrder>().HasQueryFilter(e => _tenantContext.TenantId == Guid.Empty || e.TenantId == _tenantContext.TenantId);

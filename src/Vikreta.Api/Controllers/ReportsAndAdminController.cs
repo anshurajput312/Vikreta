@@ -179,6 +179,240 @@ public class ReportsController : ControllerBase
 
         return Ok(rows);
     }
+
+    [HttpGet("profit-margin")]
+    public async Task<IActionResult> ProfitMargin(
+        [FromQuery] DateTime? from,
+        [FromQuery] DateTime? to,
+        [FromQuery] Guid? locationId,
+        [FromQuery] Guid? categoryId,
+        CancellationToken ct = default)
+    {
+        var fromDate = from ?? DateTime.UtcNow.AddDays(-30);
+        var toDate = to.HasValue ? to.Value.Date.AddDays(1) : DateTime.UtcNow;
+
+        var query = _db.InvoiceLines
+            .Include(l => l.Invoice)
+                .ThenInclude(i => i.Location)
+            .Include(l => l.Product)
+                .ThenInclude(p => p.Category)
+            .Where(l => l.Invoice.Status != InvoiceStatus.Void &&
+                        l.Invoice.IssuedAt >= fromDate && l.Invoice.IssuedAt <= toDate);
+
+        if (locationId.HasValue)
+            query = query.Where(l => l.Invoice.LocationId == locationId.Value);
+
+        if (categoryId.HasValue)
+            query = query.Where(l => l.Product.CategoryId == categoryId.Value);
+
+        var data = await query
+            .Select(l => new
+            {
+                Date = l.Invoice.IssuedAt.Date,
+                InvoiceId = l.InvoiceId,
+                LocationId = l.Invoice.LocationId,
+                LocationName = l.Invoice.Location != null ? l.Invoice.Location.Name : "Unknown",
+                CategoryId = l.Product.CategoryId,
+                CategoryName = l.Product.Category != null ? l.Product.Category.Name : "Uncategorized",
+                Quantity = l.Quantity,
+                LineTotal = l.LineTotal,
+                UnitCost = l.Product.DefaultCost,
+                LineCost = l.Quantity * l.Product.DefaultCost
+            })
+            .ToListAsync(ct);
+
+        decimal totalRev = data.Sum(x => x.LineTotal);
+        decimal totalCogs = data.Sum(x => x.LineCost);
+        decimal totalGrossProfit = totalRev - totalCogs;
+        decimal overallMargin = totalRev > 0 ? Math.Round((totalGrossProfit / totalRev) * 100m, 2) : 0m;
+
+        // Daily breakdown
+        var daily = data
+            .GroupBy(x => new { x.Date, x.LocationId, x.LocationName })
+            .Select(g =>
+            {
+                var rev = g.Sum(x => x.LineTotal);
+                var cogs = g.Sum(x => x.LineCost);
+                var gp = rev - cogs;
+                var margin = rev > 0 ? Math.Round((gp / rev) * 100m, 2) : 0m;
+                var invCount = g.Select(x => x.InvoiceId).Distinct().Count();
+                var itemsSold = g.Sum(x => x.Quantity);
+                return new ProfitMarginRowDto(
+                    g.Key.Date, g.Key.LocationId, g.Key.LocationName,
+                    rev, cogs, gp, margin, invCount, itemsSold);
+            })
+            .OrderBy(r => r.Date)
+            .ToList();
+
+        // Category breakdown
+        var categories = data
+            .GroupBy(x => x.CategoryName)
+            .Select(g =>
+            {
+                var rev = g.Sum(x => x.LineTotal);
+                var cogs = g.Sum(x => x.LineCost);
+                var gp = rev - cogs;
+                var margin = rev > 0 ? Math.Round((gp / rev) * 100m, 2) : 0m;
+                var itemsSold = g.Sum(x => x.Quantity);
+                return new CategoryMarginDto(g.Key, rev, cogs, gp, margin, itemsSold);
+            })
+            .OrderByDescending(c => c.Revenue)
+            .ToList();
+
+        // Location breakdown
+        var locations = data
+            .GroupBy(x => new { x.LocationId, x.LocationName })
+            .Select(g =>
+            {
+                var rev = g.Sum(x => x.LineTotal);
+                var cogs = g.Sum(x => x.LineCost);
+                var gp = rev - cogs;
+                var margin = rev > 0 ? Math.Round((gp / rev) * 100m, 2) : 0m;
+                return new LocationMarginDto(g.Key.LocationId, g.Key.LocationName, rev, cogs, gp, margin);
+            })
+            .OrderByDescending(l => l.Revenue)
+            .ToList();
+
+        return Ok(new ProfitMarginReportDto(
+            totalRev, totalCogs, totalGrossProfit, overallMargin,
+            daily, categories, locations));
+    }
+
+    [HttpGet("hourly-rush")]
+    public async Task<IActionResult> HourlyRush(
+        [FromQuery] DateTime? from,
+        [FromQuery] DateTime? to,
+        [FromQuery] Guid? locationId,
+        CancellationToken ct = default)
+    {
+        var fromDate = from ?? DateTime.UtcNow.AddDays(-30);
+        var toDate = to.HasValue ? to.Value.Date.AddDays(1) : DateTime.UtcNow;
+
+        var query = _db.Invoices
+            .Where(i => i.Status != InvoiceStatus.Void &&
+                        i.IssuedAt >= fromDate && i.IssuedAt <= toDate);
+
+        if (locationId.HasValue)
+            query = query.Where(i => i.LocationId == locationId.Value);
+
+        var invoices = await query
+            .Select(i => new
+            {
+                i.IssuedAt,
+                i.GrandTotal
+            })
+            .ToListAsync(ct);
+
+        string[] dayNames = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+
+        var cells = new List<HourlyCellDto>();
+        for (int d = 0; d < 7; d++)
+        {
+            for (int h = 0; h < 24; h++)
+            {
+                var matching = invoices.Where(i => (int)i.IssuedAt.DayOfWeek == d && i.IssuedAt.Hour == h).ToList();
+                int count = matching.Count;
+                decimal rev = matching.Sum(x => x.GrandTotal);
+                decimal avgTicket = count > 0 ? Math.Round(rev / count, 2) : 0m;
+                cells.Add(new HourlyCellDto(d, dayNames[d], h, count, rev, avgTicket));
+            }
+        }
+
+        var hourlySummaries = new List<HourlySummaryDto>();
+        for (int h = 0; h < 24; h++)
+        {
+            var matching = invoices.Where(i => i.IssuedAt.Hour == h).ToList();
+            int count = matching.Count;
+            decimal rev = matching.Sum(x => x.GrandTotal);
+            decimal avgRev = count > 0 ? Math.Round(rev / count, 2) : 0m;
+            int start12 = h % 12 == 0 ? 12 : h % 12;
+            string ampm = h < 12 ? "AM" : "PM";
+            string label = $"{start12} {ampm}";
+            hourlySummaries.Add(new HourlySummaryDto(h, label, count, rev, avgRev));
+        }
+
+        var busiestDayGroup = invoices
+            .GroupBy(i => (int)i.IssuedAt.DayOfWeek)
+            .OrderByDescending(g => g.Count())
+            .FirstOrDefault();
+        string busiestDay = busiestDayGroup != null && invoices.Count > 0 ? dayNames[busiestDayGroup.Key] : "N/A";
+
+        var busiestHourGroup = hourlySummaries
+            .OrderByDescending(h => h.TotalInvoices)
+            .FirstOrDefault();
+        string busiestHour = busiestHourGroup != null && busiestHourGroup.TotalInvoices > 0
+            ? busiestHourGroup.HourLabel
+            : "N/A";
+
+        return Ok(new HourlyRushReportDto(cells, hourlySummaries, busiestDay, busiestHour));
+    }
+
+    [HttpGet("cashier-performance")]
+    public async Task<IActionResult> CashierPerformance(
+        [FromQuery] DateTime? from,
+        [FromQuery] DateTime? to,
+        [FromQuery] Guid? locationId,
+        CancellationToken ct = default)
+    {
+        var fromDate = from ?? DateTime.UtcNow.AddDays(-30);
+        var toDate = to.HasValue ? to.Value.Date.AddDays(1) : DateTime.UtcNow;
+
+        var query = _db.Invoices
+            .Include(i => i.CreatedBy)
+            .Where(i => i.Status != InvoiceStatus.Void &&
+                        i.IssuedAt >= fromDate && i.IssuedAt <= toDate);
+
+        if (locationId.HasValue)
+            query = query.Where(i => i.LocationId == locationId.Value);
+
+        var invoices = await query
+            .Select(i => new
+            {
+                i.CreatedByUserId,
+                StaffName = i.CreatedBy != null ? $"{i.CreatedBy.FirstName} {i.CreatedBy.LastName}".Trim() : "Unknown Staff",
+                Email = i.CreatedBy != null ? i.CreatedBy.Email : "",
+                Role = i.CreatedBy != null ? i.CreatedBy.Role.ToString() : "Staff",
+                i.GrandTotal,
+                i.DiscountTotal,
+                i.TaxTotal,
+                i.IssuedAt
+            })
+            .ToListAsync(ct);
+
+        var grouped = invoices
+            .GroupBy(i => new { i.CreatedByUserId, i.StaffName, i.Email, i.Role })
+            .Select(g =>
+            {
+                int count = g.Count();
+                decimal totalSales = g.Sum(x => x.GrandTotal);
+                decimal avgBill = count > 0 ? Math.Round(totalSales / count, 2) : 0m;
+                decimal discountTotal = g.Sum(x => x.DiscountTotal);
+                decimal taxTotal = g.Sum(x => x.TaxTotal);
+                var first = g.Min(x => x.IssuedAt);
+                var last = g.Max(x => x.IssuedAt);
+                return new CashierPerformanceRowDto(
+                    g.Key.CreatedByUserId,
+                    g.Key.StaffName,
+                    g.Key.Email,
+                    g.Key.Role,
+                    count,
+                    totalSales,
+                    avgBill,
+                    discountTotal,
+                    taxTotal,
+                    first,
+                    last
+                );
+            })
+            .OrderByDescending(x => x.TotalSales)
+            .ToList();
+
+        decimal totalSalesAll = invoices.Sum(x => x.GrandTotal);
+        int totalInvoicesAll = invoices.Count;
+        decimal storeAvgBill = totalInvoicesAll > 0 ? Math.Round(totalSalesAll / totalInvoicesAll, 2) : 0m;
+
+        return Ok(new CashierPerformanceReportDto(totalSalesAll, totalInvoicesAll, storeAvgBill, grouped));
+    }
 }
 
 [ApiController]

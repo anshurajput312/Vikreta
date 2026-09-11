@@ -1,11 +1,13 @@
 import React, { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
+import { MessageCircle } from 'lucide-react';
 import { invoicesApi } from '../../api/client';
 import { DataTable, type Column } from '../../components/DataTable';
 import { StatusBadge } from '../../components/StatusBadge';
 import { DateRangePicker } from '../../components/FormControls';
 import { useLocationStore } from '../../stores/locationStore';
+import { ShareInvoiceModal } from '../../components/ShareInvoiceModal';
 
 const fmt = (n: number) => `₹${n.toFixed(2)}`;
 
@@ -19,6 +21,7 @@ export const InvoicesPage: React.FC = () => {
   const [to, setTo] = useState(today);
   const [status, setStatus] = useState('');
   const [page, setPage] = useState(1);
+  const [sharingInvoice, setSharingInvoice] = useState<any | null>(null);
 
   const { data, isLoading } = useQuery({
     queryKey: ['invoices', activeLocation?.id, from, to, status, page],
@@ -36,6 +39,24 @@ export const InvoicesPage: React.FC = () => {
     { key: 'issuedAt', header: 'Date', render: i => <span className="text-sm text-ink-soft">{new Date(i.issuedAt).toLocaleDateString()}</span> },
     { key: 'status', header: 'Status', render: i => <StatusBadge status={i.status} /> },
     { key: 'grandTotal', header: 'Total', render: i => <span className="font-mono text-sm font-semibold">{fmt(i.grandTotal)}</span>, className: 'text-right' },
+    {
+      key: 'share',
+      header: 'Digital Bill',
+      render: i => (
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            setSharingInvoice(i);
+          }}
+          className="px-2.5 py-1 text-xs font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 rounded-lg inline-flex items-center gap-1 transition-colors"
+          title="Share via WhatsApp or SMS"
+        >
+          <MessageCircle size={13} className="text-emerald-600" />
+          <span>Share</span>
+        </button>
+      ),
+      className: 'text-center w-28',
+    },
   ];
 
   return (
@@ -74,6 +95,18 @@ export const InvoicesPage: React.FC = () => {
           emptyMessage="No invoices found."
         />
       </div>
+
+      {sharingInvoice && (
+        <ShareInvoiceModal
+          isOpen={Boolean(sharingInvoice)}
+          onClose={() => setSharingInvoice(null)}
+          invoiceId={sharingInvoice.id}
+          invoiceNumber={sharingInvoice.invoiceNumber}
+          customerName={sharingInvoice.customerName}
+          customerPhone={sharingInvoice.customerPhone}
+          grandTotal={sharingInvoice.grandTotal}
+        />
+      )}
     </div>
   );
 };

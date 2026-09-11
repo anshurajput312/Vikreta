@@ -1,12 +1,33 @@
 import React, { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
-import { Printer, Download, MapPin, Package, RefreshCw, Search, AlertTriangle, CheckCircle, XCircle, Zap } from 'lucide-react';
+import { Printer, Download, MapPin, Package, RefreshCw, Search, AlertTriangle, CheckCircle, XCircle, Zap, FileSpreadsheet } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { reportsApi, locationsApi, purchaseOrdersApi } from '../../api/client';
+import { exportToExcel } from '../../utils/xlsxExport';
 
 const fmt = (n: number) =>
   new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 2 }).format(n);
+
+function exportExcel(rows: any[], locationName: string) {
+  const header = ['Product Name', 'SKU', 'Location', 'Qty On Hand', 'Unit Cost (INR)', 'Total Value (INR)'];
+  const lines = rows.map((r: any) => [
+    r.productName || '',
+    r.sku || '',
+    r.locationName || '',
+    r.quantityOnHand,
+    Number(r.unitCost.toFixed(2)),
+    Number(r.totalValue.toFixed(2)),
+  ]);
+
+  const totalUnits = rows.reduce((s: number, r: any) => s + r.quantityOnHand, 0);
+  const totalValue = rows.reduce((s: number, r: any) => s + r.totalValue, 0);
+  lines.push(['Total', '', '', totalUnits, '', Number(totalValue.toFixed(2))]);
+
+  const locSlug = locationName.toLowerCase().replace(/[^a-z0-9]/g, '_');
+  exportToExcel(`stock_valuation_${locSlug}_${new Date().toISOString().split('T')[0]}`, 'Stock_Valuation', header, lines);
+  toast.success('Stock valuation exported to Excel (.xlsx)');
+}
 
 function exportCsv(rows: any[], locationName: string) {
   const header = ['Product Name', 'SKU', 'Location', 'Qty On Hand', 'Unit Cost (INR)', 'Total Value (INR)'];
@@ -156,6 +177,14 @@ export const StockValuationPage: React.FC = () => {
             id="stock-export-csv-btn"
           >
             <Download size={14} /> Export CSV
+          </button>
+          <button
+            onClick={() => exportExcel(rows, activeLocationName)}
+            className="btn-secondary flex items-center gap-1.5 text-emerald-700 hover:text-emerald-800 hover:border-emerald-400"
+            disabled={!rows.length || isLoading}
+            id="stock-export-excel-btn"
+          >
+            <FileSpreadsheet size={14} className="text-emerald-600" /> Export Excel
           </button>
           <button
             onClick={() => window.print()}

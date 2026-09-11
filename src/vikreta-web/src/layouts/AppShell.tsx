@@ -3,7 +3,7 @@ import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard, Package, Tags, Boxes, ArrowLeftRight, Receipt,
   FileText, Users, Truck, ShoppingCart, BarChart2, TrendingUp,
-  DollarSign, Settings, LogOut, Menu, X, Search,
+  DollarSign, Settings, LogOut, Menu, X, Search, PieChart, Clock, UserCheck,
 } from 'lucide-react';
 import { LocationSwitcher } from '../components/LocationSwitcher';
 import { useAuthStore } from '../stores/authStore';
@@ -57,6 +57,9 @@ const NAV: NavGroup[] = [
     group: 'Reports',
     items: [
       { label: 'Sales', to: '/reports/sales', icon: BarChart2 },
+      { label: 'P&L Profit & Margin', to: '/reports/profit-margin', icon: PieChart },
+      { label: 'Hourly Rush Heatmap', to: '/reports/hourly-rush', icon: Clock },
+      { label: 'Cashier Performance', to: '/reports/cashier-performance', icon: UserCheck },
       { label: 'Stock Valuation', to: '/reports/stock-valuation', icon: Boxes },
       { label: 'Top Products', to: '/reports/top-products', icon: TrendingUp },
       { label: 'Tax Summary', to: '/reports/tax-summary', icon: DollarSign },

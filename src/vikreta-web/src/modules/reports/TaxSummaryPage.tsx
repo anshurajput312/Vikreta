@@ -1,15 +1,38 @@
 import React, { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
-import { Printer, Download, RefreshCw, Calendar, MapPin, Percent, DollarSign, Receipt, PieChart } from 'lucide-react';
+import { Printer, Download, RefreshCw, Calendar, MapPin, Percent, DollarSign, Receipt, PieChart, FileSpreadsheet } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { reportsApi, locationsApi } from '../../api/client';
+import { exportToExcel } from '../../utils/xlsxExport';
 
 const today = new Date().toISOString().split('T')[0];
 const monthAgo = new Date(Date.now() - 30 * 86400000).toISOString().split('T')[0];
 
 const fmt = (n: number) =>
   new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 2 }).format(n);
+
+function exportExcel(rows: any[], from: string, to: string) {
+  const header = ['Tax Rate (%)', 'Taxable Amount (INR)', 'Tax Collected (INR)', 'Total with Tax (INR)'];
+  const lines: (string | number)[][] = rows.map((r: any) => {
+    const ratePct = (r.taxRate * 100).toFixed(1);
+    const gross = r.taxableAmount + r.taxCollected;
+    return [
+      Number(ratePct),
+      Number(r.taxableAmount.toFixed(2)),
+      Number(r.taxCollected.toFixed(2)),
+      Number(gross.toFixed(2)),
+    ];
+  });
+
+  const totalTaxable = rows.reduce((s: number, r: any) => s + r.taxableAmount, 0);
+  const totalTax = rows.reduce((s: number, r: any) => s + r.taxCollected, 0);
+  const totalGross = totalTaxable + totalTax;
+  lines.push(['Total', Number(totalTaxable.toFixed(2)), Number(totalTax.toFixed(2)), Number(totalGross.toFixed(2))]);
+
+  exportToExcel(`tax_summary_${from}_to_${to}`, 'Tax_Summary', header, lines);
+  toast.success('Tax summary report exported to Excel (.xlsx)');
+}
 
 function exportCsv(rows: any[], from: string, to: string) {
   const header = ['Tax Rate (%)', 'Taxable Amount (INR)', 'Tax Collected (INR)', 'Total with Tax (INR)'];
@@ -115,6 +138,14 @@ export const TaxSummaryPage: React.FC = () => {
             id="tax-export-csv-btn"
           >
             <Download size={14} /> Export CSV
+          </button>
+          <button
+            onClick={() => exportExcel(rows, from, to)}
+            className="btn-secondary flex items-center gap-1.5 text-emerald-700 hover:text-emerald-800 hover:border-emerald-400"
+            disabled={!rows.length || isLoading}
+            id="tax-export-excel-btn"
+          >
+            <FileSpreadsheet size={14} className="text-emerald-600" /> Export Excel
           </button>
           <button
             onClick={() => window.print()}

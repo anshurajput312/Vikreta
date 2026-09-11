@@ -1,5 +1,5 @@
 /**
- * Formats a digital receipt text for sharing via WhatsApp
+ * Digital Receipt formatting and sharing utilities for WhatsApp & SMS
  */
 
 const fmt = (n: number) =>
@@ -22,8 +22,22 @@ export interface WhatsAppReceiptParams {
   grandTotal: number;
   paymentMethod?: string;
   storeAddress?: string;
+  invoiceUrl?: string;
 }
 
+/**
+ * Gets the clean, public digital invoice URL for customers
+ */
+export function getDigitalInvoiceUrl(invoiceId: string): string {
+  if (typeof window !== 'undefined' && window.location) {
+    return `${window.location.origin}/receipt/${invoiceId}`;
+  }
+  return `/receipt/${invoiceId}`;
+}
+
+/**
+ * Formats a rich, emoji-adorned digital receipt for WhatsApp
+ */
 export function formatWhatsAppReceipt(p: WhatsAppReceiptParams): string {
   const lines: string[] = [
     `🧾 *${p.storeName.toUpperCase()}*`,
@@ -61,6 +75,12 @@ export function formatWhatsAppReceipt(p: WhatsAppReceiptParams): string {
     lines.push(`*Paid via:* ${p.paymentMethod} ✅`);
   }
 
+  if (p.invoiceUrl) {
+    lines.push('────────────────────────');
+    lines.push('📄 *View / Download Digital Bill:*');
+    lines.push(p.invoiceUrl);
+  }
+
   lines.push('────────────────────────');
   lines.push('Thank you for shopping with us! 🙏');
   lines.push('Please visit again.');
@@ -69,10 +89,31 @@ export function formatWhatsAppReceipt(p: WhatsAppReceiptParams): string {
 }
 
 /**
- * Creates a clean wa.me link
+ * Formats a clean, high-impact SMS message with the digital invoice link
+ */
+export function formatSmsReceipt(p: WhatsAppReceiptParams): string {
+  const greeting = p.customerName ? `Dear ${p.customerName}` : 'Dear Customer';
+  const parts = [
+    `${greeting}, thanks for shopping at ${p.storeName}!`,
+    `Bill #${p.invoiceNumber}`,
+    `Total: ${fmt(p.grandTotal)}`,
+  ];
+
+  if (p.invoiceUrl) {
+    parts.push(`View digital bill: ${p.invoiceUrl}`);
+  } else {
+    parts.push('Thank you, visit again!');
+  }
+
+  return parts.join(' | ');
+}
+
+/**
+ * Creates a clean wa.me link for WhatsApp sharing
  */
 export function buildWhatsAppLink(phone: string | null | undefined, text: string): string {
   let cleanPhone = (phone || '').replace(/\D/g, '');
+  // Format for Indian numbers if 10 digits
   if (cleanPhone.length === 10) {
     cleanPhone = '91' + cleanPhone;
   }
@@ -81,4 +122,26 @@ export function buildWhatsAppLink(phone: string | null | undefined, text: string
     return `https://wa.me/${cleanPhone}?text=${encodedText}`;
   }
   return `https://api.whatsapp.com/send?text=${encodedText}`;
+}
+
+/**
+ * Creates a standard universal SMS link
+ */
+export function buildSmsLink(phone: string | null | undefined, text: string): string {
+  let cleanPhone = (phone || '').replace(/\D/g, '');
+  if (cleanPhone.length === 10) {
+    cleanPhone = '+91' + cleanPhone;
+  } else if (cleanPhone && !cleanPhone.startsWith('+')) {
+    cleanPhone = '+' + cleanPhone;
+  }
+
+  const encodedText = encodeURIComponent(text);
+  // iOS uses '&body=', Android and desktop use '?body='
+  const isIOS = typeof navigator !== 'undefined' && /iPad|iPhone|iPod/.test(navigator.userAgent);
+  const delimiter = isIOS ? '&' : '?';
+
+  if (cleanPhone) {
+    return `sms:${cleanPhone}${delimiter}body=${encodedText}`;
+  }
+  return `sms:${delimiter}body=${encodedText}`;
 }

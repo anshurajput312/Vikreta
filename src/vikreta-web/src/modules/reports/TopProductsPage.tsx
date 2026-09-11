@@ -1,16 +1,40 @@
 import React, { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-import { Printer, Download, TrendingUp, RefreshCw, Calendar, MapPin, Award, ShoppingBag, DollarSign, Trophy, Medal, Package, Store } from 'lucide-react';
+import { Printer, Download, TrendingUp, RefreshCw, Calendar, MapPin, Award, ShoppingBag, DollarSign, Trophy, Medal, Package, Store, FileSpreadsheet } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { reportsApi, locationsApi } from '../../api/client';
 import { useLocationStore } from '../../stores/locationStore';
+import { exportToExcel } from '../../utils/xlsxExport';
 
 const today = new Date().toISOString().split('T')[0];
 const monthAgo = new Date(Date.now() - 30 * 86400000).toISOString().split('T')[0];
 
 const fmt = (n: number) =>
   new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 2 }).format(n);
+
+function exportExcel(rows: any[], from: string, to: string) {
+  const header = ['Rank', 'Product Name', 'SKU', 'Units Sold', 'Revenue (INR)', 'Revenue Share (%)'];
+  const totalRev = rows.reduce((s: number, r: any) => s + r.revenue, 0);
+
+  const lines = rows.map((r: any) => {
+    const pct = totalRev > 0 ? ((r.revenue / totalRev) * 100).toFixed(1) : '0.0';
+    return [
+      r.rank,
+      r.productName || '',
+      r.sku || '',
+      r.unitsSold,
+      Number(r.revenue.toFixed(2)),
+      Number(pct),
+    ];
+  });
+
+  const totalUnits = rows.reduce((s: number, r: any) => s + r.unitsSold, 0);
+  lines.push(['Total', '', '', totalUnits, Number(totalRev.toFixed(2)), 100]);
+
+  exportToExcel(`top_products_${from}_to_${to}`, 'Top_Products', header, lines);
+  toast.success('Top products report exported to Excel (.xlsx)');
+}
 
 function exportCsv(rows: any[], from: string, to: string) {
   const header = ['Rank', 'Product Name', 'SKU', 'Units Sold', 'Revenue (INR)', 'Revenue Share (%)'];
@@ -119,6 +143,14 @@ export const TopProductsPage: React.FC = () => {
             id="top-products-export-csv-btn"
           >
             <Download size={14} /> Export CSV
+          </button>
+          <button
+            onClick={() => exportExcel(rows, from, to)}
+            className="btn-secondary flex items-center gap-1.5 text-emerald-700 hover:text-emerald-800 hover:border-emerald-400"
+            disabled={!rows.length || isLoading}
+            id="top-products-export-excel-btn"
+          >
+            <FileSpreadsheet size={14} className="text-emerald-600" /> Export Excel
           </button>
           <button
             onClick={() => window.print()}

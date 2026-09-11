@@ -4,19 +4,27 @@ import { toast } from 'react-hot-toast';
 import {
   X, Printer, UserPlus, Search, UserCheck, GripVertical,
   QrCode, Clock, Tag, MessageCircle, Maximize2, RotateCcw,
-  DollarSign, AlertCircle, Edit2, Sparkles, Keyboard
+  DollarSign, AlertCircle, Edit2, Sparkles, Keyboard, CheckCircle,
+  PhoneCall
 } from 'lucide-react';
 import { productsApi, invoicesApi, customersApi, adminApi } from '../../api/client';
 import { useCartStore } from '../../stores/cartStore';
 import { useLocationStore } from '../../stores/locationStore';
 import { QuantityStepper } from '../../components/FormControls';
 import { QRCodeSVG } from '../../components/QRCode';
-import { formatWhatsAppReceipt, buildWhatsAppLink } from '../../utils/whatsappReceipt';
+import { 
+  formatWhatsAppReceipt, 
+  buildWhatsAppLink, 
+  formatSmsReceipt, 
+  buildSmsLink, 
+  getDigitalInvoiceUrl 
+} from '../../utils/whatsappReceipt';
+import { ShareInvoiceModal } from '../../components/ShareInvoiceModal';
 
 const fmt = (n: number) =>
   new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 2 }).format(n);
 
-type PaymentMethod = 'Cash' | 'UPI' | 'Card' | 'Other';
+type PaymentMethod = 'Cash' | 'UPI' | 'Card' | 'StoreCredit' | 'Other';
 type CustomerModalTab = 'find' | 'new';
 
 const DEFAULT_INVOICE_WIDTH = 380;
@@ -246,6 +254,7 @@ export const PosPage: React.FC = () => {
     grandTotal: number;
     paymentMethod: string;
   } | null>(null);
+  const [showShareModal, setShowShareModal] = useState(false);
 
   // Readjustable Panels State
   const [invoiceWidth, setInvoiceWidth] = useState<number>(() => {
@@ -485,6 +494,7 @@ export const PosPage: React.FC = () => {
   const handleShareWhatsApp = (customPhone?: string) => {
     if (!completedSale) return;
     const phone = customPhone || completedSale.customerPhone;
+    const invoiceUrl = getDigitalInvoiceUrl(completedSale.invoiceId);
     const text = formatWhatsAppReceipt({
       storeName: storeUpiName,
       invoiceNumber: completedSale.invoiceNumber,
@@ -497,10 +507,34 @@ export const PosPage: React.FC = () => {
       grandTotal: completedSale.grandTotal,
       paymentMethod: completedSale.paymentMethod,
       storeAddress: activeLocation?.address,
+      invoiceUrl,
     });
 
     const url = buildWhatsAppLink(phone, text);
     window.open(url, '_blank');
+  };
+
+  // Share via SMS handler
+  const handleShareSms = (customPhone?: string) => {
+    if (!completedSale) return;
+    const phone = customPhone || completedSale.customerPhone;
+    const invoiceUrl = getDigitalInvoiceUrl(completedSale.invoiceId);
+    const text = formatSmsReceipt({
+      storeName: storeUpiName,
+      invoiceNumber: completedSale.invoiceNumber,
+      date: new Date().toLocaleDateString('en-IN'),
+      customerName: completedSale.customerName,
+      items: completedSale.items,
+      subtotal: completedSale.subtotal,
+      discountTotal: completedSale.discountTotal,
+      taxTotal: completedSale.taxTotal,
+      grandTotal: completedSale.grandTotal,
+      paymentMethod: completedSale.paymentMethod,
+      invoiceUrl,
+    });
+
+    const url = buildSmsLink(phone, text);
+    window.location.href = url;
   };
 
   const handleHoldCart = () => {
@@ -846,6 +880,26 @@ export const PosPage: React.FC = () => {
             </div>
           </div>
         </div>
+      )}
+
+      {/* ── Share Digital Invoice Modal ────────────────────────────────────── */}
+      {showShareModal && completedSale && (
+        <ShareInvoiceModal
+          isOpen={showShareModal}
+          onClose={() => setShowShareModal(false)}
+          invoiceId={completedSale.invoiceId}
+          invoiceNumber={completedSale.invoiceNumber}
+          customerName={completedSale.customerName}
+          customerPhone={completedSale.customerPhone}
+          grandTotal={completedSale.grandTotal}
+          subtotal={completedSale.subtotal}
+          discountTotal={completedSale.discountTotal}
+          taxTotal={completedSale.taxTotal}
+          items={completedSale.items}
+          paymentMethod={completedSale.paymentMethod}
+          storeName={storeUpiName}
+          storeAddress={activeLocation?.address}
+        />
       )}
 
       {/* ── Shortcuts Cheat Sheet Modal ────────────────────────────────────────── */}
@@ -1523,23 +1577,45 @@ export const PosPage: React.FC = () => {
               </p>
               <p className="text-center font-bold text-base text-cherry mb-3">Current Sale</p>
 
-              {/* Completed Sale Notification with WhatsApp Action */}
+              {/* Completed Sale Notification with WhatsApp & SMS Actions */}
               {completedSale && (
-                <div className="p-3 mb-4 bg-teal-light border-2 border-teal rounded-xl animate-in fade-in space-y-2">
+                <div className="p-3 mb-4 bg-teal-light border-2 border-teal rounded-xl animate-in fade-in space-y-2 shadow-sm">
                   <div className="flex items-center justify-between text-teal-dark font-bold text-xs">
-                    <span>✓ Sale completed! #{completedSale.invoiceNumber}</span>
+                    <span className="flex items-center gap-1">
+                      <CheckCircle size={13} className="text-teal-dark" />
+                      Sale completed! #{completedSale.invoiceNumber}
+                    </span>
                     <button onClick={() => setCompletedSale(null)} className="text-ink-soft hover:text-ink">
                       ✕
                     </button>
                   </div>
-                  <button
-                    onClick={() => handleShareWhatsApp()}
-                    className="w-full bg-[#25D366] hover:bg-[#1EBE5D] text-white py-2 px-3 rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 transition-colors shadow-sm"
-                    id="whatsapp-share-btn"
-                  >
-                    <MessageCircle size={14} /> Send Receipt on WhatsApp
-                    <kbd className="text-[10px] font-mono bg-white/20 px-1 py-0.5 rounded ml-1">Alt+W</kbd>
-                  </button>
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      onClick={() => handleShareWhatsApp()}
+                      className="flex-1 bg-[#25D366] hover:bg-[#1EBE5D] text-white py-2 px-2 rounded-lg text-xs font-bold flex items-center justify-center gap-1 transition-all shadow-sm active:scale-[0.98]"
+                      id="whatsapp-share-btn"
+                      title="Send Bill via WhatsApp (Alt+W)"
+                    >
+                      <MessageCircle size={14} /> WhatsApp
+                      <kbd className="text-[10px] font-mono bg-white/20 px-1 py-0.5 rounded ml-0.5">Alt+W</kbd>
+                    </button>
+                    <button
+                      onClick={() => handleShareSms()}
+                      className="bg-ink hover:bg-ink-dark text-white py-2 px-2.5 rounded-lg text-xs font-bold flex items-center justify-center gap-1 transition-all shadow-sm active:scale-[0.98]"
+                      id="sms-share-btn"
+                      title="Send Bill via SMS Text"
+                    >
+                      <PhoneCall size={13} /> SMS
+                    </button>
+                    <button
+                      onClick={() => setShowShareModal(true)}
+                      className="bg-white hover:bg-paper-alt text-ink border border-line py-2 px-2 rounded-lg text-xs font-bold flex items-center justify-center gap-1 transition-all shadow-sm"
+                      id="share-modal-open-btn"
+                      title="QR Scan & More Share Options"
+                    >
+                      <QrCode size={13} />
+                    </button>
+                  </div>
                 </div>
               )}
 
@@ -1615,6 +1691,32 @@ export const PosPage: React.FC = () => {
                     ) : (
                       <span className="text-[10px] text-ink-soft">Earn 1 pt / ₹{loyaltyPointsPerAmount}</span>
                     )}
+                  </div>
+                )}
+
+                {/* Store Credit Strip */}
+                {cart.customerId && Boolean(customerDetails?.storeCreditBalance && customerDetails.storeCreditBalance > 0) && (
+                  <div className="flex items-center justify-between mt-2 pt-2 border-t border-line/60 bg-teal-50/60 -mx-1 px-2 py-1 rounded">
+                    <div className="flex items-center gap-1">
+                      <RotateCcw size={12} className="text-teal-700" />
+                      <span className="font-mono text-xs font-bold text-teal-900">
+                        {fmt(customerDetails!.storeCreditBalance)}
+                      </span>
+                      <span className="text-[10px] text-teal-800">
+                        Store Credit Available
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPaymentMethod('StoreCredit');
+                        toast.success('Payment method set to Store Credit');
+                      }}
+                      className="text-[10px] font-bold text-teal-800 hover:text-teal-950 underline"
+                      id="use-store-credit-btn"
+                    >
+                      Use as Payment
+                    </button>
                   </div>
                 )}
               </div>
@@ -1774,42 +1876,65 @@ export const PosPage: React.FC = () => {
             {/* Payment footer */}
             <div className="px-5 pb-5 pt-2 bg-[#FFFDF7] border-t-2 border-dashed border-line flex-shrink-0">
               {/* Payment Methods Grid */}
-              <div className="grid grid-cols-4 gap-1.5 mb-3">
-                {(['Cash', 'UPI', 'Card', 'Other'] as PaymentMethod[]).map((method) => (
-                  <button
-                    key={method}
-                    type="button"
-                    onClick={() => {
-                      setPaymentMethod(method);
-                      if (method === 'UPI' && !storeUpiId) {
-                        setShowUpiConfigModal(true);
-                      }
-                    }}
-                    className={`py-2 px-1 text-xs font-bold rounded-lg border-2 transition-all flex flex-col items-center justify-center
-                      ${paymentMethod === method
-                        ? 'bg-teal text-white border-teal shadow-sm scale-[1.02]'
-                        : 'bg-white text-ink border-ink hover:bg-paper-alt'}`}
-                    id={`pos-pay-method-${method.toLowerCase()}`}
-                  >
-                    <span>{method}</span>
-                    {method === 'Cash' && (
-                      <span className="text-[9px] font-mono opacity-70 mt-0.5 px-1 bg-black/10 rounded">
-                        Space
-                      </span>
-                    )}
-                    {method === 'UPI' && (
-                      <span className="text-[9px] font-mono opacity-70 mt-0.5 px-1 bg-black/10 rounded">
-                        F6
-                      </span>
-                    )}
-                    {method === 'Card' && (
-                      <span className="text-[9px] font-mono opacity-70 mt-0.5 px-1 bg-black/10 rounded">
-                        F7
-                      </span>
-                    )}
-                  </button>
-                ))}
+              <div className="grid grid-cols-5 gap-1.5 mb-3">
+                {(['Cash', 'UPI', 'Card', 'StoreCredit', 'Other'] as PaymentMethod[]).map((method) => {
+                  const isStoreCredit = method === 'StoreCredit';
+                  const hasStoreCredit = (customerDetails?.storeCreditBalance ?? 0) > 0;
+                  const isDisabled = isStoreCredit && (!cart.customerId || !hasStoreCredit);
+                  return (
+                    <button
+                      key={method}
+                      type="button"
+                      disabled={isDisabled}
+                      onClick={() => {
+                        setPaymentMethod(method);
+                        if (method === 'UPI' && !storeUpiId) {
+                          setShowUpiConfigModal(true);
+                        }
+                      }}
+                      className={`py-2 px-1 text-xs font-bold rounded-lg border-2 transition-all flex flex-col items-center justify-center
+                        ${isDisabled ? 'opacity-40 border-line bg-paper-alt cursor-not-allowed' : ''}
+                        ${paymentMethod === method
+                          ? 'bg-teal text-white border-teal shadow-sm scale-[1.02]'
+                          : 'bg-white text-ink border-ink hover:bg-paper-alt'}`}
+                      id={`pos-pay-method-${method.toLowerCase()}`}
+                      title={isStoreCredit && isDisabled ? 'Customer has no store credit' : ''}
+                    >
+                      <span className="truncate">{method === 'StoreCredit' ? 'Credit' : method}</span>
+                      {method === 'Cash' && (
+                        <span className="text-[9px] font-mono opacity-70 mt-0.5 px-1 bg-black/10 rounded">
+                          Space
+                        </span>
+                      )}
+                      {method === 'UPI' && (
+                        <span className="text-[9px] font-mono opacity-70 mt-0.5 px-1 bg-black/10 rounded">
+                          F6
+                        </span>
+                      )}
+                      {method === 'Card' && (
+                        <span className="text-[9px] font-mono opacity-70 mt-0.5 px-1 bg-black/10 rounded">
+                          F7
+                        </span>
+                      )}
+                      {method === 'StoreCredit' && hasStoreCredit && (
+                        <span className="text-[9px] font-mono font-bold text-teal-800 mt-0.5 truncate">
+                          ₹{customerDetails!.storeCreditBalance.toFixed(0)}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
               </div>
+
+              {/* Store Credit Banner when selected */}
+              {paymentMethod === 'StoreCredit' && (
+                <div className="mb-3 p-2.5 bg-teal-50 border border-teal/40 rounded-lg text-xs flex items-center justify-between">
+                  <div className="flex items-center gap-1.5 text-teal-900">
+                    <CheckCircle size={14} className="text-teal flex-shrink-0" />
+                    <span>Deducting <strong>{fmt(cart.grandTotal())}</strong> from customer credit ({fmt(customerDetails?.storeCreditBalance ?? 0)})</span>
+                  </div>
+                </div>
+              )}
 
               {/* ── UPI Interactive Panel ─────────────────────────────────── */}
               {paymentMethod === 'UPI' && cart.lines.length > 0 && (

@@ -59,7 +59,7 @@ public class InvoicesController : ControllerBase
         return Ok(new PagedResult<InvoiceSummaryDto>(
             items.Select(i => new InvoiceSummaryDto(
                 i.Id, i.InvoiceNumber, i.CustomerId, i.Customer?.Name,
-                i.IssuedAt, i.GrandTotal, i.Status.ToString())).ToList(),
+                i.IssuedAt, i.GrandTotal, i.Status.ToString(), i.Customer?.Phone)).ToList(),
             total, page, pageSize));
     }
 
@@ -183,6 +183,20 @@ public class InvoicesController : ControllerBase
         if (invoice == null) return NotFound();
         if (invoice.Status == InvoiceStatus.Void) return BadRequest(new { error = "Cannot pay a voided invoice." });
 
+        if (request.Method == PaymentMethod.StoreCredit)
+        {
+            if (!invoice.CustomerId.HasValue)
+            {
+                return BadRequest(new { error = "Store credit payment requires a customer." });
+            }
+            var customer = await _db.Customers.FindAsync(new object[] { invoice.CustomerId.Value }, ct);
+            if (customer == null || customer.StoreCreditBalance < request.Amount)
+            {
+                return BadRequest(new { error = $"Insufficient store credit balance. Current balance: {customer?.StoreCreditBalance ?? 0:C2}" });
+            }
+            customer.StoreCreditBalance -= request.Amount;
+        }
+
         var wasPaid = invoice.Status == InvoiceStatus.Paid;
         var payment = new Payment
         {
@@ -250,12 +264,296 @@ public class InvoicesController : ControllerBase
         return Ok(new { message = "Invoice voided." });
     }
 
+    [HttpGet("{id:guid}/returns")]
+    public async Task<IActionResult> GetReturns(Guid id, CancellationToken ct)
+    {
+        var returns = await _db.InvoiceReturns
+            .Include(r => r.ProcessedByUser)
+            .Include(r => r.Lines)
+                .ThenInclude(l => l.Product)
+            .Where(r => r.InvoiceId == id)
+            .OrderByDescending(r => r.ReturnedAt)
+            .ToListAsync(ct);
+
+        var dtos = returns.Select(r => new InvoiceReturnDto(
+            r.Id,
+            r.InvoiceId,
+            r.ReturnNumber,
+            r.ReturnedAt,
+            r.TotalRefundAmount,
+            r.RefundMethod.ToString(),
+            r.Reason,
+            r.ProcessedByUserId,
+            r.ProcessedByUser != null ? $"{r.ProcessedByUser.FirstName} {r.ProcessedByUser.LastName}".Trim() : null,
+            r.Lines.Select(l => new InvoiceReturnLineDto(
+                l.Id,
+                l.InvoiceLineId,
+                l.ProductId,
+                l.ProductNameSnapshot,
+                l.Product != null ? l.Product.Sku : "",
+                l.Quantity,
+                l.RefundAmount,
+                l.Restocked,
+                r.Reason
+            )).ToList()
+        )).ToList();
+
+        return Ok(dtos);
+    }
+
+    [HttpPost("{id:guid}/returns")]
+    public async Task<IActionResult> CreateReturn(Guid id, [FromBody] CreateReturnRequest req, CancellationToken ct)
+    {
+        if (req.Items == null || req.Items.Count == 0)
+            return BadRequest(new { message = "At least one item must be returned." });
+
+        var invoice = await _db.Invoices
+            .Include(i => i.Lines)
+            .Include(i => i.Customer)
+            .Include(i => i.Returns)
+                .ThenInclude(r => r.Lines)
+            .FirstOrDefaultAsync(i => i.Id == id, ct);
+
+        if (invoice == null)
+            return NotFound(new { message = "Invoice not found." });
+
+        if (invoice.Status == InvoiceStatus.Void)
+            return BadRequest(new { message = "Cannot process returns on a voided invoice." });
+
+        // Calculate already returned quantities per line
+        var existingReturns = invoice.Returns.SelectMany(r => r.Lines).ToList();
+        var returnedPerLine = existingReturns
+            .GroupBy(l => l.InvoiceLineId)
+            .ToDictionary(g => g.Key, g => g.Sum(x => x.Quantity));
+
+        PaymentMethod refundMethod = PaymentMethod.Cash;
+        if (!string.IsNullOrWhiteSpace(req.RefundType))
+        {
+            if (Enum.TryParse<PaymentMethod>(req.RefundType, true, out var parsed))
+                refundMethod = parsed;
+        }
+
+        if (refundMethod == PaymentMethod.StoreCredit && invoice.CustomerId == null)
+        {
+            return BadRequest(new { message = "Store credit refund requires a registered customer on the invoice." });
+        }
+
+        var userIdClaim = User.FindFirstValue(ClaimTypes.NameIdentifier) ?? User.FindFirstValue("sub");
+        var userId = Guid.TryParse(userIdClaim, out var uid) ? uid : invoice.CreatedByUserId;
+
+        var returnEntity = new InvoiceReturn
+        {
+            Id = Guid.NewGuid(),
+            TenantId = _tenant.TenantId,
+            InvoiceId = invoice.Id,
+            ReturnNumber = $"RET-{DateTime.UtcNow:yyyyMMdd}-{Random.Shared.Next(1000, 9999)}",
+            ReturnedAt = DateTime.UtcNow,
+            RefundMethod = refundMethod,
+            Reason = req.Reason ?? "Customer return",
+            ProcessedByUserId = userId
+        };
+
+        decimal totalRefund = 0;
+        var returnLines = new List<InvoiceReturnLine>();
+
+        foreach (var item in req.Items)
+        {
+            if (item.Quantity <= 0)
+                return BadRequest(new { message = "Return quantity must be greater than zero." });
+
+            var invoiceLine = invoice.Lines.FirstOrDefault(l => l.Id == item.InvoiceLineId);
+            if (invoiceLine == null)
+                return BadRequest(new { message = $"Invoice line {item.InvoiceLineId} not found on this invoice." });
+
+            var alreadyReturned = returnedPerLine.GetValueOrDefault(item.InvoiceLineId, 0);
+            if (alreadyReturned + item.Quantity > invoiceLine.Quantity)
+            {
+                return BadRequest(new { message = $"Cannot return {item.Quantity} of {invoiceLine.ProductNameSnapshot}. Already returned: {alreadyReturned}, Original sold: {invoiceLine.Quantity}." });
+            }
+
+            // Update running tally
+            returnedPerLine[item.InvoiceLineId] = alreadyReturned + item.Quantity;
+
+            decimal lineRefundAmount = item.RefundAmount > 0
+                ? item.RefundAmount
+                : Math.Round((invoiceLine.LineTotal / invoiceLine.Quantity) * item.Quantity, 2);
+
+            totalRefund += lineRefundAmount;
+
+            var rLine = new InvoiceReturnLine
+            {
+                Id = Guid.NewGuid(),
+                ReturnId = returnEntity.Id,
+                InvoiceLineId = invoiceLine.Id,
+                ProductId = invoiceLine.ProductId,
+                VariantId = invoiceLine.VariantId,
+                ProductNameSnapshot = invoiceLine.ProductNameSnapshot,
+                Quantity = item.Quantity,
+                UnitPriceSnapshot = invoiceLine.UnitPriceSnapshot,
+                RefundAmount = lineRefundAmount,
+                Restocked = item.RestockInventory
+            };
+
+            returnLines.Add(rLine);
+
+            if (item.RestockInventory)
+            {
+                var product = await _db.Products.FindAsync(new object[] { invoiceLine.ProductId }, ct);
+                if (product?.TracksInventory == true)
+                {
+                    await _inventory.RecordTransactionAsync(
+                        _tenant.TenantId,
+                        invoice.LocationId,
+                        invoiceLine.ProductId,
+                        invoiceLine.VariantId,
+                        item.Quantity,
+                        InventoryTransactionType.AdjustmentIncrease,
+                        returnEntity.Id,
+                        $"Return: {returnEntity.ReturnNumber}",
+                        userId,
+                        ct);
+                }
+            }
+        }
+
+        returnEntity.TotalRefundAmount = totalRefund;
+        returnEntity.Lines = returnLines;
+
+        // Apply Store Credit if requested
+        if (refundMethod == PaymentMethod.StoreCredit && invoice.CustomerId.HasValue)
+        {
+            var customer = await _db.Customers.FirstOrDefaultAsync(c => c.Id == invoice.CustomerId.Value, ct);
+            if (customer != null)
+            {
+                customer.StoreCreditBalance += totalRefund;
+            }
+        }
+
+        // Check if all lines are now completely returned
+        bool allFullyReturned = invoice.Lines.All(l => returnedPerLine.GetValueOrDefault(l.Id, 0) >= l.Quantity);
+        if (allFullyReturned)
+        {
+            invoice.Status = InvoiceStatus.Refunded;
+        }
+
+        _db.InvoiceReturns.Add(returnEntity);
+        await _db.SaveChangesAsync(ct);
+
+        var user = await _db.Users.FindAsync(new object[] { userId }, ct);
+        var staffName = user != null ? $"{user.FirstName} {user.LastName}".Trim() : null;
+
+        var dto = new InvoiceReturnDto(
+            returnEntity.Id,
+            returnEntity.InvoiceId,
+            returnEntity.ReturnNumber,
+            returnEntity.ReturnedAt,
+            returnEntity.TotalRefundAmount,
+            returnEntity.RefundMethod.ToString(),
+            returnEntity.Reason,
+            returnEntity.ProcessedByUserId,
+            staffName,
+            returnLines.Select(l => new InvoiceReturnLineDto(
+                l.Id,
+                l.InvoiceLineId,
+                l.ProductId,
+                l.ProductNameSnapshot,
+                "",
+                l.Quantity,
+                l.RefundAmount,
+                l.Restocked,
+                returnEntity.Reason
+            )).ToList()
+        );
+
+        return Ok(dto);
+    }
+
+    [AllowAnonymous]
+    [HttpGet("public/{id:guid}")]
+    public async Task<IActionResult> GetPublicInvoice(Guid id, CancellationToken ct)
+    {
+        var invoice = await _db.Invoices
+            .IgnoreQueryFilters()
+            .Include(i => i.Location)
+            .Include(i => i.Customer)
+            .Include(i => i.Lines)
+            .Include(i => i.Payments)
+            .Include(i => i.Returns)
+                .ThenInclude(r => r.Lines)
+            .FirstOrDefaultAsync(i => i.Id == id, ct);
+
+        if (invoice == null) return NotFound(new { message = "Digital invoice not found." });
+
+        var tenant = await _db.Tenants.IgnoreQueryFilters().FirstOrDefaultAsync(t => t.Id == invoice.TenantId, ct);
+        var settings = await _db.TenantSettings.IgnoreQueryFilters().FirstOrDefaultAsync(s => s.TenantId == invoice.TenantId, ct);
+
+        var returnDtos = invoice.Returns?.Select(r => new InvoiceReturnDto(
+            r.Id,
+            r.InvoiceId,
+            r.ReturnNumber,
+            r.ReturnedAt,
+            r.TotalRefundAmount,
+            r.RefundMethod.ToString(),
+            r.Reason,
+            r.ProcessedByUserId,
+            null,
+            r.Lines.Select(rl => new InvoiceReturnLineDto(
+                rl.Id,
+                rl.InvoiceLineId,
+                rl.ProductId,
+                rl.ProductNameSnapshot,
+                "",
+                rl.Quantity,
+                rl.RefundAmount,
+                rl.Restocked,
+                r.Reason
+            )).ToList()
+        )).ToList();
+
+        var dto = new PublicInvoiceDto(
+            invoice.Id,
+            invoice.InvoiceNumber,
+            tenant?.Name ?? "Vikreta Retail",
+            invoice.Location?.Name ?? "Main Store",
+            invoice.Location?.Address,
+            invoice.Customer?.Name,
+            invoice.Customer?.Phone,
+            invoice.IssuedAt,
+            invoice.Subtotal,
+            invoice.TaxTotal,
+            invoice.DiscountTotal,
+            invoice.GrandTotal,
+            invoice.Status.ToString(),
+            settings?.ReceiptHeader ?? "",
+            settings?.ReceiptFooter ?? "Thank you for shopping with us! Please visit again.",
+            invoice.Lines.Select(l => new PublicInvoiceLineDto(
+                l.ProductNameSnapshot,
+                l.VariantAttributeSnapshot,
+                l.Quantity,
+                l.UnitPriceSnapshot,
+                l.TaxRateSnapshot,
+                l.LineDiscount,
+                l.LineTotal
+            )).ToList(),
+            invoice.Payments.Select(p => new PaymentDto(
+                p.Id, p.Amount, p.Method.ToString(), p.PaidAt, p.ReferenceNumber
+            )).ToList(),
+            returnDtos
+        );
+
+        return Ok(dto);
+    }
+
     private async Task<Invoice?> GetFullInvoice(Guid id, CancellationToken ct) =>
         await _db.Invoices
             .Include(i => i.Location)
             .Include(i => i.Customer)
             .Include(i => i.Lines)
             .Include(i => i.Payments)
+            .Include(i => i.Returns)
+                .ThenInclude(r => r.Lines)
+            .Include(i => i.Returns)
+                .ThenInclude(r => r.ProcessedByUser)
             .FirstOrDefaultAsync(i => i.Id == id, ct);
 
     private static InvoiceDto MapInvoice(Invoice i) => new(
@@ -265,5 +563,28 @@ public class InvoicesController : ControllerBase
         i.Lines.Select(l => new InvoiceLineDto(
             l.Id, l.ProductId, l.ProductNameSnapshot, l.VariantAttributeSnapshot,
             l.Quantity, l.UnitPriceSnapshot, l.TaxRateSnapshot, l.LineDiscount, l.LineTotal)).ToList(),
-        i.Payments.Select(p => new PaymentDto(p.Id, p.Amount, p.Method.ToString(), p.PaidAt, p.ReferenceNumber)).ToList());
+        i.Payments.Select(p => new PaymentDto(p.Id, p.Amount, p.Method.ToString(), p.PaidAt, p.ReferenceNumber)).ToList(),
+        i.Returns?.Select(r => new InvoiceReturnDto(
+            r.Id,
+            r.InvoiceId,
+            r.ReturnNumber,
+            r.ReturnedAt,
+            r.TotalRefundAmount,
+            r.RefundMethod.ToString(),
+            r.Reason,
+            r.ProcessedByUserId,
+            r.ProcessedByUser != null ? $"{r.ProcessedByUser.FirstName} {r.ProcessedByUser.LastName}".Trim() : null,
+            r.Lines.Select(rl => new InvoiceReturnLineDto(
+                rl.Id,
+                rl.InvoiceLineId,
+                rl.ProductId,
+                rl.ProductNameSnapshot,
+                "",
+                rl.Quantity,
+                rl.RefundAmount,
+                rl.Restocked,
+                r.Reason
+            )).ToList()
+        )).ToList(),
+        i.Customer?.Phone);
 }

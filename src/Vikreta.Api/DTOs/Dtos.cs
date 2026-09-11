@@ -75,21 +75,43 @@ public record InvoiceLineDto(
     int Quantity, decimal UnitPriceSnapshot, decimal TaxRateSnapshot,
     decimal LineDiscount, decimal LineTotal);
 public record PaymentDto(Guid Id, decimal Amount, string Method, DateTime PaidAt, string ReferenceNumber);
+public record InvoiceReturnLineDto(
+    Guid Id, Guid InvoiceLineId, Guid ProductId, string ProductName, string Sku,
+    int QuantityReturned, decimal RefundAmount, bool RestockInventory, string Reason);
+public record InvoiceReturnDto(
+    Guid Id, Guid InvoiceId, string ReturnNumber, DateTime ReturnedAt,
+    decimal TotalRefundAmount, string RefundType, string? Reason,
+    Guid? ProcessedByUserId, string? ProcessedByUserName,
+    List<InvoiceReturnLineDto> Lines);
 public record InvoiceDto(
     Guid Id, string InvoiceNumber, Guid LocationId, string LocationName,
     Guid? CustomerId, string? CustomerName,
     DateTime IssuedAt, decimal Subtotal, decimal TaxTotal, decimal DiscountTotal,
     decimal GrandTotal, string Status, string Notes,
-    List<InvoiceLineDto> Lines, List<PaymentDto> Payments);
+    List<InvoiceLineDto> Lines, List<PaymentDto> Payments,
+    List<InvoiceReturnDto>? Returns = null,
+    string? CustomerPhone = null);
 public record InvoiceSummaryDto(
     Guid Id, string InvoiceNumber, Guid? CustomerId, string? CustomerName,
-    DateTime IssuedAt, decimal GrandTotal, string Status);
+    DateTime IssuedAt, decimal GrandTotal, string Status,
+    string? CustomerPhone = null);
+public record PublicInvoiceLineDto(
+    string ProductName, string VariantAttribute, int Quantity, decimal UnitPrice, decimal TaxRate, decimal LineDiscount, decimal LineTotal);
+public record PublicInvoiceDto(
+    Guid Id, string InvoiceNumber, string StoreName, string LocationName, string? LocationAddress,
+    string? CustomerName, string? CustomerPhone, DateTime IssuedAt, decimal Subtotal, decimal TaxTotal, decimal DiscountTotal,
+    decimal GrandTotal, string Status, string ReceiptHeader, string ReceiptFooter,
+    List<PublicInvoiceLineDto> Lines, List<PaymentDto> Payments, List<InvoiceReturnDto>? Returns = null);
 public record CreateInvoiceLineRequest(
     Guid ProductId, Guid? VariantId, int Quantity, decimal? UnitPriceOverride, decimal LineDiscount);
 public record CreateInvoiceRequest(
     Guid LocationId, Guid? CustomerId, string Notes,
     List<CreateInvoiceLineRequest> Lines, int PointsRedeemed = 0);
 public record AddPaymentRequest(decimal Amount, PaymentMethod Method, string ReferenceNumber);
+public record ReturnItemRequest(
+    Guid InvoiceLineId, int Quantity, decimal RefundAmount, bool RestockInventory = true, string Reason = "Customer return");
+public record CreateReturnRequest(
+    List<ReturnItemRequest> Items, string RefundType = "Cash", string? Reason = null);
 
 // ── Customers ─────────────────────────────────────────────────────────────────
 public record CustomerDto(Guid Id, string Name, string Phone, string Email, string Address, decimal StoreCreditBalance, int LoyaltyPoints, DateTime CreatedAt, bool IsActive);
@@ -135,6 +157,40 @@ public record SalesReportRow(DateTime Date, Guid? LocationId, string LocationNam
 public record StockValuationRow(Guid ProductId, string ProductName, string Sku, Guid LocationId, string LocationName, int QuantityOnHand, decimal UnitCost, decimal TotalValue);
 public record TopProductRow(Guid ProductId, string ProductName, string Sku, int UnitsSold, decimal Revenue, int Rank);
 public record TaxSummaryRow(decimal TaxRate, decimal TaxableAmount, decimal TaxCollected);
+
+// P&L Profit & Margin Report
+public record ProfitMarginRowDto(
+    DateTime Date, Guid LocationId, string LocationName,
+    decimal Revenue, decimal CostOfGoodsSold, decimal GrossProfit, decimal GrossProfitMarginPercent,
+    int InvoicesCount, int ItemsSold);
+public record CategoryMarginDto(
+    string CategoryName, decimal Revenue, decimal CostOfGoodsSold, decimal GrossProfit, decimal GrossProfitMarginPercent, int ItemsSold);
+public record LocationMarginDto(
+    Guid LocationId, string LocationName, decimal Revenue, decimal CostOfGoodsSold, decimal GrossProfit, decimal GrossProfitMarginPercent);
+public record ProfitMarginReportDto(
+    decimal TotalRevenue, decimal TotalCogs, decimal TotalGrossProfit, decimal OverallMarginPercent,
+    List<ProfitMarginRowDto> DailyBreakdown,
+    List<CategoryMarginDto> CategoryBreakdown,
+    List<LocationMarginDto> LocationBreakdown);
+
+// Hourly Rush Heatmap
+public record HourlyCellDto(
+    int DayOfWeek, string DayName, int Hour, int InvoiceCount, decimal Revenue, decimal AvgTicket);
+public record HourlySummaryDto(
+    int Hour, string HourLabel, int TotalInvoices, decimal TotalRevenue, decimal AvgRevenue);
+public record HourlyRushReportDto(
+    List<HourlyCellDto> Heatmap,
+    List<HourlySummaryDto> PeakHoursSummary,
+    string BusiestDay, string BusiestHour);
+
+// Cashier & Staff Performance
+public record CashierPerformanceRowDto(
+    Guid UserId, string StaffName, string Email, string Role,
+    int TotalInvoices, decimal TotalSales, decimal AverageBillSize,
+    decimal TotalDiscountGiven, decimal TotalTaxCollected, DateTime? FirstSaleAt, DateTime? LastSaleAt);
+public record CashierPerformanceReportDto(
+    decimal TotalSalesAllStaff, int TotalInvoicesAllStaff, decimal StoreAvgBillSize,
+    List<CashierPerformanceRowDto> Cashiers);
 
 // ── Dashboard ─────────────────────────────────────────────────────────────────
 public record DashboardSummaryDto(

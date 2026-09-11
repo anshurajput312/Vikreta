@@ -1,9 +1,18 @@
 import axios, { AxiosError, type InternalAxiosRequestConfig } from 'axios';
 import { useAuthStore } from '../stores/authStore';
 
-const BASE_URL = import.meta.env.VITE_API_URL ?? 'https://localhost:7001';
+const isRemoteHost = typeof window !== 'undefined' &&
+  window.location.hostname !== 'localhost' &&
+  window.location.hostname !== '127.0.0.1';
+
+const BASE_URL = isRemoteHost ? '' : (import.meta.env.VITE_API_URL ?? 'http://localhost:5010');
 
 export const apiClient = axios.create({
+  baseURL: `${BASE_URL}/api`,
+  headers: { 'Content-Type': 'application/json' },
+});
+
+export const publicApiClient = axios.create({
   baseURL: `${BASE_URL}/api`,
   headers: { 'Content-Type': 'application/json' },
 });
@@ -163,9 +172,12 @@ export const transfersApi = {
 export const invoicesApi = {
   list: (params?: object) => apiClient.get('/invoices', { params }),
   get: (id: string) => apiClient.get(`/invoices/${id}`),
+  getPublic: (id: string) => publicApiClient.get(`/invoices/public/${id}`),
   create: (data: object) => apiClient.post('/invoices', data),
   addPayment: (id: string, data: object) => apiClient.post(`/invoices/${id}/payments`, data),
   void: (id: string) => apiClient.post(`/invoices/${id}/void`),
+  getReturns: (id: string) => apiClient.get(`/invoices/${id}/returns`),
+  createReturn: (id: string, data: object) => apiClient.post(`/invoices/${id}/returns`, data),
 };
 
 // Customers
@@ -203,6 +215,9 @@ export const reportsApi = {
   stockValuation: (params?: object) => apiClient.get('/reports/stock-valuation', { params }),
   topProducts: (params?: object) => apiClient.get('/reports/top-products', { params }),
   taxSummary: (params?: object) => apiClient.get('/reports/tax-summary', { params }),
+  profitMargin: (params?: object) => apiClient.get('/reports/profit-margin', { params }),
+  hourlyRush: (params?: object) => apiClient.get('/reports/hourly-rush', { params }),
+  cashierPerformance: (params?: object) => apiClient.get('/reports/cashier-performance', { params }),
 };
 
 // Dashboard
