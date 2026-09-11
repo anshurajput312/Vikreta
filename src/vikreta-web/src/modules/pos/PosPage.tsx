@@ -5,7 +5,7 @@ import {
   X, Printer, UserPlus, Search, UserCheck, GripVertical,
   QrCode, Clock, Tag, MessageCircle, Maximize2, RotateCcw,
   DollarSign, AlertCircle, Edit2, Sparkles, Keyboard, CheckCircle,
-  PhoneCall
+  PhoneCall, ChevronLeft, Package, Receipt, Camera
 } from 'lucide-react';
 import { productsApi, invoicesApi, customersApi, adminApi } from '../../api/client';
 import { useCartStore } from '../../stores/cartStore';
@@ -20,6 +20,7 @@ import {
   getDigitalInvoiceUrl 
 } from '../../utils/whatsappReceipt';
 import { ShareInvoiceModal } from '../../components/ShareInvoiceModal';
+import { CameraBarcodeScannerModal } from '../../components/CameraBarcodeScannerModal';
 
 const fmt = (n: number) =>
   new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 2 }).format(n);
@@ -255,6 +256,19 @@ export const PosPage: React.FC = () => {
     paymentMethod: string;
   } | null>(null);
   const [showShareModal, setShowShareModal] = useState(false);
+  const [showCameraScanner, setShowCameraScanner] = useState(false);
+
+  // Mobile Responsiveness State (< md breakpoint: 768px)
+  const [isMobile, setIsMobile] = useState(() => typeof window !== 'undefined' ? window.innerWidth < 768 : false);
+  const [mobileTab, setMobileTab] = useState<'catalog' | 'bill'>('catalog');
+
+  useEffect(() => {
+    const handleResize = () => {
+      setIsMobile(window.innerWidth < 768);
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
 
   // Readjustable Panels State
   const [invoiceWidth, setInvoiceWidth] = useState<number>(() => {
@@ -381,6 +395,47 @@ export const PosPage: React.FC = () => {
     toast.success(`${product.name} added`, { duration: 800 });
   };
 
+  const handleBarcodeScanned = async (barcode: string): Promise<{ success: boolean; productName?: string; price?: number }> => {
+    const clean = barcode.trim();
+    if (!clean) return { success: false };
+
+    // 1. In-memory check against loaded products by barcode or sku
+    let target = products.find(
+      (p: any) =>
+        (p.barcode && p.barcode.toLowerCase() === clean.toLowerCase()) ||
+        (p.sku && p.sku.toLowerCase() === clean.toLowerCase())
+    );
+
+    // 2. Query backend by barcode if not found in current loaded chunk
+    if (!target) {
+      try {
+        const res = await productsApi.getByBarcode(clean);
+        if (res.data) {
+          target = res.data;
+        }
+      } catch {
+        try {
+          const searchRes = await productsApi.list({ search: clean, pageSize: 5 });
+          const items: any[] = searchRes?.data?.items ?? searchRes?.data ?? [];
+          const match = items.find(
+            (p: any) =>
+              (p.barcode && p.barcode.toLowerCase() === clean.toLowerCase()) ||
+              (p.sku && p.sku.toLowerCase() === clean.toLowerCase())
+          );
+          if (match) target = match;
+        } catch {}
+      }
+    }
+
+    if (target) {
+      addToCart(target);
+      return { success: true, productName: target.name, price: target.defaultPrice };
+    } else {
+      toast.error(`Product not found for barcode "${clean}"`);
+      return { success: false };
+    }
+  };
+
   const handleSelectCustomer = (id: string, name: string, phone?: string) => {
     cart.setCustomer(id, name);
     if (phone) setCustomerPhone(phone);
@@ -479,6 +534,7 @@ export const PosPage: React.FC = () => {
         paymentMethod,
       });
 
+      setMobileTab('bill');
       queryClient.invalidateQueries({ queryKey: ['customer', cart.customerId] });
       queryClient.invalidateQueries({ queryKey: ['customers'] });
       cart.clear();
@@ -576,6 +632,13 @@ export const PosPage: React.FC = () => {
       if (e.key === 'F3' || (e.altKey && (e.key === 'c' || e.key === 'C'))) {
         e.preventDefault();
         setShowCustomerModal((prev) => !prev);
+        return;
+      }
+
+      // Alt + B: Open / Close Camera Barcode Scanner
+      if (e.altKey && (e.key === 'b' || e.key === 'B')) {
+        e.preventDefault();
+        setShowCameraScanner((prev) => !prev);
         return;
       }
 
@@ -1006,6 +1069,7 @@ export const PosPage: React.FC = () => {
                   {[
                     { key: 'F1', label: 'Hotkeys Guide', desc: 'Open or close this cheat sheet' },
                     { key: 'F2', label: 'Focus Search', desc: 'Focus product search / barcode input' },
+                    { key: 'Alt + B', label: 'Camera Scanner', desc: 'Scan barcode using device camera' },
                     { key: 'F8', label: 'Park Sale', desc: 'Hold current cart for waiting customer' },
                     { key: 'F9', label: 'Parked Sales', desc: 'View and resume held carts' },
                     { key: 'Ctrl + P', label: 'Print Receipt', desc: 'Print receipt / invoice copy' },
@@ -1415,17 +1479,67 @@ export const PosPage: React.FC = () => {
         </div>
       )}
 
+      {/* ── Camera Barcode Scanner Modal ────────────────────────────────────────── */}
+      <CameraBarcodeScannerModal
+        isOpen={showCameraScanner}
+        onClose={() => setShowCameraScanner(false)}
+        onScan={handleBarcodeScanned}
+      />
+
       {/* ── Main Layout ──────────────────────────────────────────────────────── */}
-      <div className={`flex h-[calc(100vh-57px)] bg-paper-alt overflow-hidden ${isDragging ? 'select-none' : ''}`}>
+      <div className={`flex flex-col md:flex-row h-[calc(100vh-57px)] bg-paper-alt overflow-hidden ${isDragging ? 'select-none' : ''}`}>
         {/* ── Left: Product picker (Item Selection Side) ─────────────── */}
-        <div className="flex flex-col flex-1 p-5 overflow-hidden min-w-0">
-          {/* Top action row: Search & Held Sales button */}
-          <div className="flex items-center gap-2 mb-3">
+        <div className={`${mobileTab === 'catalog' ? 'flex' : 'hidden'} md:flex flex-col flex-1 p-3 sm:p-5 overflow-hidden min-w-0 relative`}>
+          
+          {/* Mobile Top View Switcher (Visible only on < md) */}
+          <div className="flex md:hidden items-center justify-between gap-1 p-1 bg-paper border border-line rounded-xl mb-2.5 flex-shrink-0">
+            <button
+              type="button"
+              onClick={() => setMobileTab('catalog')}
+              className={`flex-1 py-1.5 px-3 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
+                mobileTab === 'catalog'
+                  ? 'bg-ink text-white shadow-xs'
+                  : 'text-ink-soft hover:text-ink'
+              }`}
+            >
+              <Package size={14} />
+              <span>Products</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setMobileTab('bill')}
+              className={`flex-1 py-1.5 px-3 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 relative ${
+                mobileTab === 'bill'
+                  ? 'bg-teal text-white shadow-xs'
+                  : 'text-ink-soft hover:text-ink'
+              }`}
+            >
+              <Receipt size={14} />
+              <span>Current Bill</span>
+              {cart.lines.length > 0 && (
+                <span className={`inline-flex items-center justify-center px-1.5 py-0.5 rounded-full text-[10px] font-mono font-bold ${
+                  mobileTab === 'bill' ? 'bg-white text-teal-dark' : 'bg-marigold text-ink'
+                }`}>
+                  {cart.lines.reduce((s, l) => s + l.quantity, 0)} • {fmt(cart.grandTotal())}
+                </span>
+              )}
+            </button>
+          </div>
+
+          {/* Top action row: Search, Camera Barcode Scanner & Held Sales */}
+          <div className="flex items-center gap-1.5 sm:gap-2 mb-3">
             <div className="relative flex-1">
               <input
                 ref={scanRef}
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && search.trim()) {
+                    handleBarcodeScanned(search.trim()).then((res) => {
+                      if (res.success) setSearch('');
+                    });
+                  }
+                }}
                 placeholder="▤  Scan barcode or search products…"
                 className="input w-full pr-16"
                 id="pos-search"
@@ -1440,17 +1554,29 @@ export const PosPage: React.FC = () => {
                     ✕
                   </button>
                 ) : null}
-                <kbd className="text-[10px] font-mono font-bold bg-paper-alt text-ink-soft px-1.5 py-0.5 rounded border border-line shadow-2xs">
+                <kbd className="hidden sm:inline text-[10px] font-mono font-bold bg-paper-alt text-ink-soft px-1.5 py-0.5 rounded border border-line shadow-2xs">
                   F2
                 </kbd>
               </div>
             </div>
 
+            {/* Mobile / Desktop Camera Barcode Scanner Button */}
+            <button
+              type="button"
+              onClick={() => setShowCameraScanner(true)}
+              className="btn bg-teal text-white border-ink hover:bg-teal-dark flex items-center gap-1.5 flex-shrink-0 text-xs py-2 px-2.5 sm:px-3 shadow-xs transition-colors"
+              title="Scan Barcode with Mobile / Device Camera [Alt+B]"
+              id="pos-camera-scan-btn"
+            >
+              <Camera size={15} />
+              <span className="hidden xs:inline font-bold">Camera Scan</span>
+            </button>
+
             {/* Shortcuts Guide Button */}
             <button
               type="button"
               onClick={() => setShowShortcutsModal(true)}
-              className="btn-ghost flex items-center gap-1.5 flex-shrink-0 text-xs py-2 px-2.5 text-ink-soft hover:text-ink border border-line rounded-lg"
+              className="hidden sm:flex btn-ghost items-center gap-1.5 flex-shrink-0 text-xs py-2 px-2.5 text-ink-soft hover:text-ink border border-line rounded-lg"
               title="View Keyboard Hotkeys [F1]"
               id="pos-shortcuts-btn"
             >
@@ -1469,8 +1595,8 @@ export const PosPage: React.FC = () => {
               id="held-sales-btn"
             >
               <Clock size={14} />
-              <span>Parked</span>
-              <kbd className="text-[10px] font-mono text-ink-soft bg-paper-alt px-1 rounded border border-line">F9</kbd>
+              <span className="hidden xs:inline">Parked</span>
+              <kbd className="hidden sm:inline text-[10px] font-mono text-ink-soft bg-paper-alt px-1 rounded border border-line">F9</kbd>
               {cart.heldCarts.length > 0 && (
                 <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-marigold text-ink text-[11px] font-bold font-mono">
                   {cart.heldCarts.length}
@@ -1480,7 +1606,7 @@ export const PosPage: React.FC = () => {
           </div>
 
           {/* Category filter */}
-          <div className="flex gap-2 mb-4 overflow-x-auto pb-1 flex-shrink-0">
+          <div className="flex gap-1.5 sm:gap-2 mb-3 sm:mb-4 overflow-x-auto pb-1 flex-shrink-0 no-scrollbar">
             <button
               onClick={() => setActiveCategory(null)}
               className={`cat-pill flex-shrink-0 ${
@@ -1506,23 +1632,23 @@ export const PosPage: React.FC = () => {
           </div>
 
           {/* Product grid */}
-          <div className="flex-1 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 overflow-y-auto content-start pr-1">
+          <div className="flex-1 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2.5 sm:gap-3 overflow-y-auto content-start pr-1 pb-24 md:pb-1">
             {filtered.map((product: any) => (
               <button
                 key={product.id}
                 onClick={() => addToCart(product)}
-                className="bg-white border-2 border-ink rounded-xl p-3.5 text-left
-                           cursor-pointer hover:shadow-card hover:-translate-y-0.5 transition-all
-                           min-h-[96px] flex flex-col justify-between relative overflow-hidden"
+                className="bg-white border-2 border-ink rounded-xl p-3 sm:p-3.5 text-left
+                           cursor-pointer hover:shadow-card hover:-translate-y-0.5 active:scale-[0.98] transition-all
+                           min-h-[88px] sm:min-h-[96px] flex flex-col justify-between relative overflow-hidden"
                 id={`product-${product.id}`}
               >
                 <div
                   className="absolute left-0 top-0 bottom-0 w-1.5 rounded-l-xl"
                   style={{ backgroundColor: product.categoryColorHex ?? '#1D7874' }}
                 />
-                <p className="text-[13px] font-medium leading-tight pl-2.5 line-clamp-2">{product.name}</p>
+                <p className="text-[12px] sm:text-[13px] font-medium leading-tight pl-2 sm:pl-2.5 line-clamp-2">{product.name}</p>
                 <p
-                  className="font-mono text-sm font-bold mt-2 pl-2.5"
+                  className="font-mono text-xs sm:text-sm font-bold mt-2 pl-2 sm:pl-2.5"
                   style={{ color: product.categoryColorHex ?? '#1D7874' }}
                 >
                   {fmt(product.defaultPrice)}
@@ -1535,6 +1661,36 @@ export const PosPage: React.FC = () => {
               </div>
             )}
           </div>
+
+          {/* Floating Mobile Cart Action Bar (Visible only on < md) */}
+          {cart.lines.length > 0 && (
+            <div className="md:hidden fixed bottom-3 left-3 right-3 z-30 animate-in slide-in-from-bottom-3 duration-200">
+              <button
+                type="button"
+                onClick={() => setMobileTab('bill')}
+                className="w-full bg-ink text-white p-3 rounded-2xl shadow-xl flex items-center justify-between border-2 border-line active:scale-[0.99] transition-transform"
+                id="mobile-view-cart-btn"
+              >
+                <div className="flex items-center gap-2.5 text-left">
+                  <div className="w-8 h-8 rounded-xl bg-marigold text-ink flex items-center justify-center font-mono font-bold text-xs flex-shrink-0">
+                    {cart.lines.reduce((s, l) => s + l.quantity, 0)}
+                  </div>
+                  <div>
+                    <p className="text-[10px] text-white/70 uppercase tracking-wider font-semibold leading-tight">
+                      Order Summary
+                    </p>
+                    <p className="font-mono text-base font-extrabold text-white leading-tight">
+                      {fmt(cart.grandTotal())}
+                    </p>
+                  </div>
+                </div>
+                <div className="bg-marigold hover:bg-marigold-dark text-ink font-bold text-xs px-3.5 py-2 rounded-xl flex items-center gap-1.5 shadow-xs transition-colors">
+                  <span>View Bill & Pay</span>
+                  <span className="font-mono text-sm">→</span>
+                </div>
+              </button>
+            </div>
+          )}
         </div>
 
         {/* ── Readjustable Splitter Handle ───────────────────────────── */}
@@ -1546,7 +1702,7 @@ export const PosPage: React.FC = () => {
             localStorage.setItem('pos_invoice_panel_width', String(DEFAULT_INVOICE_WIDTH));
             toast.success('Reset panel size', { duration: 1000 });
           }}
-          className={`w-3.5 relative flex items-center justify-center cursor-col-resize group flex-shrink-0 transition-colors z-10 ${
+          className={`hidden md:flex w-3.5 relative items-center justify-center cursor-col-resize group flex-shrink-0 transition-colors z-10 ${
             isDragging ? 'bg-teal' : 'bg-line hover:bg-teal/40'
           }`}
           title="Drag to readjust panels • Double-click to reset"
@@ -1563,15 +1719,31 @@ export const PosPage: React.FC = () => {
 
         {/* ── Right: Receipt / Bill Invoice Side ─────────────────────── */}
         <div
-          className="bg-ink flex items-stretch p-3 flex-shrink-0"
-          style={{ width: `${invoiceWidth}px` }}
+          className={`${mobileTab === 'bill' ? 'flex' : 'hidden'} md:flex bg-ink items-stretch p-2 sm:p-3 flex-shrink-0 w-full md:w-auto h-full overflow-hidden`}
+          style={isMobile ? undefined : { width: `${invoiceWidth}px` }}
         >
           <div className="bg-[#FFFDF7] w-full flex flex-col shadow-receipt overflow-hidden printable-area rounded-sm">
             {/* Serrated top edge */}
             <div className="receipt-edge-top flex-shrink-0" />
 
             {/* Receipt body */}
-            <div className="flex-1 overflow-y-auto px-5 py-4">
+            <div className="flex-1 overflow-y-auto px-4 sm:px-5 py-3 sm:py-4">
+              
+              {/* Mobile Back to Products Bar (Visible only on < md) */}
+              <div className="md:hidden flex items-center justify-between pb-3 mb-3 border-b border-line">
+                <button
+                  type="button"
+                  onClick={() => setMobileTab('catalog')}
+                  className="text-xs font-bold text-teal-dark hover:text-teal flex items-center gap-1 bg-teal-light px-3 py-1.5 rounded-lg border border-teal/30 active:scale-95 transition-transform"
+                  id="mobile-back-to-products-btn"
+                >
+                  <ChevronLeft size={15} /> + Add More Items
+                </button>
+                <span className="text-xs font-mono font-bold text-ink-soft">
+                  {cart.lines.reduce((s, l) => s + l.quantity, 0)} item(s) in cart
+                </span>
+              </div>
+
               <p className="text-center font-mono text-[11px] tracking-widest text-ink-soft uppercase mb-1">
                 {activeLocation?.name ?? 'Store'} — Register 1
               </p>
@@ -1776,7 +1948,7 @@ export const PosPage: React.FC = () => {
                                 });
                                 setLineDiscountInput('');
                               }}
-                              className="text-[10px] text-ink-soft hover:text-marigold-dark transition-colors opacity-0 group-hover:opacity-100"
+                              className="text-[10px] text-ink-soft hover:text-marigold-dark transition-colors opacity-100 md:opacity-0 md:group-hover:opacity-100"
                               title="Add Item Discount"
                             >
                               +discount
@@ -1790,7 +1962,7 @@ export const PosPage: React.FC = () => {
                         </span>
                         <button
                           onClick={() => cart.removeItem(line.productId, line.variantId)}
-                          className="text-ink-soft hover:text-cherry transition-colors opacity-0 group-hover:opacity-100"
+                          className="text-ink-soft hover:text-cherry transition-colors p-0.5 opacity-100 md:opacity-0 md:group-hover:opacity-100"
                           title="Remove item"
                         >
                           <X size={12} />
