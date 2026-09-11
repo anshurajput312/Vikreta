@@ -82,6 +82,7 @@ export const CameraBarcodeScannerModal: React.FC<CameraBarcodeScannerModalProps>
 }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const readerRef = useRef<BrowserMultiFormatReader | null>(null);
+  const nativeTimerRef = useRef<any>(null);
 
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [facingMode, setFacingMode] = useState<'environment' | 'user'>('environment');
@@ -99,6 +100,10 @@ export const CameraBarcodeScannerModal: React.FC<CameraBarcodeScannerModalProps>
 
   // Stop current video stream & decoder
   const stopScanner = useCallback(() => {
+    if (nativeTimerRef.current) {
+      clearInterval(nativeTimerRef.current);
+      nativeTimerRef.current = null;
+    }
     if (readerRef.current) {
       try {
         readerRef.current.reset();
@@ -184,26 +189,24 @@ export const CameraBarcodeScannerModal: React.FC<CameraBarcodeScannerModalProps>
       stopScanner();
 
       try {
-        // Configure comprehensive barcode formats including all retail 1D & 2D formats
+        // Configure comprehensive retail barcode formats
         const hints = new Map();
         const formats = [
           BarcodeFormat.EAN_13,
-          BarcodeFormat.EAN_8,
           BarcodeFormat.CODE_128,
-          BarcodeFormat.CODE_39,
-          BarcodeFormat.CODE_93,
           BarcodeFormat.UPC_A,
           BarcodeFormat.UPC_E,
-          BarcodeFormat.ITF,
+          BarcodeFormat.EAN_8,
+          BarcodeFormat.CODE_39,
+          BarcodeFormat.CODE_93,
           BarcodeFormat.QR_CODE,
+          BarcodeFormat.ITF,
           BarcodeFormat.DATA_MATRIX,
-          BarcodeFormat.CODABAR,
         ];
         hints.set(DecodeHintType.POSSIBLE_FORMATS, formats);
-        // TRY_HARDER enables enhanced edge analysis & multiple contrast sweeps for difficult labels
         hints.set(DecodeHintType.TRY_HARDER, true);
 
-        const reader = new BrowserMultiFormatReader(hints, 100);
+        const reader = new BrowserMultiFormatReader(hints, 80);
         readerRef.current = reader;
 
         // Enumerate video input devices
@@ -214,16 +217,38 @@ export const CameraBarcodeScannerModal: React.FC<CameraBarcodeScannerModalProps>
 
         if (!videoRef.current || !isMounted) return;
 
-        // High-resolution video constraints for sharp 1D barcode lines
+        // Video constraints without restrictive min values to support all phones & webcams
         const videoConstraints: MediaTrackConstraints = {
-          width: { ideal: 1920, min: 1280 },
-          height: { ideal: 1080, min: 720 },
+          width: { ideal: 1920 },
+          height: { ideal: 1080 },
         };
 
         if (selectedDeviceId) {
           videoConstraints.deviceId = { exact: selectedDeviceId };
         } else {
           videoConstraints.facingMode = { ideal: facingMode };
+        }
+
+        // Native BarcodeDetector loop for Android Chrome / iOS Safari (hardware-accelerated 60fps)
+        if (typeof window !== 'undefined' && 'BarcodeDetector' in window) {
+          try {
+            const nativeDetector = new (window as any).BarcodeDetector({
+              formats: ['ean_13', 'code_128', 'upc_a', 'upc_e', 'ean_8', 'code_39', 'qr_code'],
+            });
+
+            nativeTimerRef.current = setInterval(async () => {
+              if (!videoRef.current || videoRef.current.readyState < 2 || !isMounted) return;
+              try {
+                const detected = await nativeDetector.detect(videoRef.current);
+                if (detected && detected.length > 0 && isMounted) {
+                  const val = detected[0].rawValue;
+                  if (val) {
+                    handleBarcodeDetected(val);
+                  }
+                }
+              } catch {}
+            }, 100);
+          } catch {}
         }
 
         await reader.decodeFromConstraints(
