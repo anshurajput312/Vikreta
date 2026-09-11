@@ -5,7 +5,7 @@ const isRemoteHost = typeof window !== 'undefined' &&
   window.location.hostname !== 'localhost' &&
   window.location.hostname !== '127.0.0.1';
 
-const BASE_URL = isRemoteHost ? '' : (import.meta.env.VITE_API_URL ?? 'http://localhost:5010');
+const BASE_URL = import.meta.env.VITE_API_URL ?? '';
 
 export const apiClient = axios.create({
   baseURL: `${BASE_URL}/api`,

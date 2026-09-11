@@ -79,14 +79,11 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
 
 builder.Services.AddAuthorization();
 
-// CORS — allow frontend dev server
+// CORS — allow frontend dev server (supports localhost 5173, 5174, ngrok, LAN)
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("VikretaWeb", policy =>
-        policy.WithOrigins(
-            "http://localhost:5173",
-            "http://localhost:3000",
-            builder.Configuration["AllowedOrigins"] ?? "http://localhost:5173")
+        policy.SetIsOriginAllowed(_ => true)
         .AllowAnyHeader()
         .AllowAnyMethod()
         .AllowCredentials());
